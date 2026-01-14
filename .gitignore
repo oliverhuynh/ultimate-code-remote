@@ -54,3 +54,5 @@ src/data/
 
 # Claude configuration (user-specific)
 CLAUDE.md
+AGENTS.md
+tasks
