@@ -1,6 +1,8 @@
-# Claude Code Remote
+# AI Code Remote
 
-Control [Claude Code](https://claude.ai/code) remotely via multiple messaging platforms. Start tasks locally, receive notifications when Claude completes them, and send new commands by simply replying to messages.
+Control your AI coding agent remotely via multiple messaging platforms. Start tasks locally, receive notifications when the AI completes them, and send new commands by simply replying to messages.
+
+This project is based on and inspired by [Claude-Code-Remote](https://github.com/JessyTsui/Claude-Code-Remote).
 
 **Supported Platforms:**
 - 📧 **Email** - Traditional SMTP/IMAP integration with execution trace
@@ -20,7 +22,7 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
   
 </div>
 
-> 🐦 Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) for updates and AI development insights
+> 📣 Follow [@oliverhuynh](https://www.facebook.com/oliverhuynh) for updates and AI development insights
 
 ## ✨ Features
 
@@ -30,12 +32,12 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
   - LINE messaging with token-based commands
   - Desktop notifications with sound alerts
 - **🔄 Two-way Control**: Reply to messages or emails to send new commands
-- **📱 Remote Access**: Control Claude from anywhere
+- **📱 Remote Access**: Control your AI from anywhere
 - **🔒 Secure**: ID-based whitelist verification for all platforms
 - **👥 Group Support**: Use in LINE groups or Telegram groups for team collaboration
 - **🤖 Smart Commands**: Intuitive command formats for each platform
 - **📋 Multi-line Support**: Send complex commands with formatting
-- **⚡ Smart Monitoring**: Intelligent detection of Claude responses with historical tracking
+- **⚡ Smart Monitoring**: Intelligent detection of AI responses with historical tracking
 - **🔄 tmux Integration**: Seamless command injection into active tmux sessions
 - **📊 Execution Trace**: Full terminal output capture in email notifications
 
@@ -47,7 +49,7 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
   - ✅ **Telegram Integration Completed** - Interactive buttons, real-time commands, smart personal/group chat handling
   - ✅ **Multi-Channel Notifications** - Simultaneous delivery to Desktop, Telegram, Email, LINE
   - ✅ **Smart Sound Alerts** - Always-on audio feedback with customizable sounds
-  - ✅ **Intelligent Session Management** - Auto-detection, real conversation content, 24-hour tokens
+  - ✅ **Intelligent Session Management** - Auto-detection, real conversation content
 - **2025-08-01**: Fix #9 #12: Add configuration to disable subagent notifications ([#10](https://github.com/JessyTsui/Claude-Code-Remote/pull/10) by [@vaclisinc](https://github.com/vaclisinc))
 - **2025-08-01**: Implement terminal-style UI for email notifications ([#8](https://github.com/JessyTsui/Claude-Code-Remote/pull/8) by [@vaclisinc](https://github.com/vaclisinc))
 - **2025-08-01**: Fix working directory issue - enable claude-remote to run from any directory ([#7](https://github.com/JessyTsui/Claude-Code-Remote/pull/7) by [@vaclisinc](https://github.com/vaclisinc))
@@ -73,7 +75,7 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
 - **📧 Scheduled Reports** - Daily/weekly usage summaries delivered via email
 
 ### Native Apps
-- **📱 Mobile Apps** - iOS and Android applications for remote Claude control
+- **📱 Mobile Apps** - iOS and Android applications for remote AI control
 - **🖥️ Desktop Apps** - macOS and Windows native clients with system integration
 
 ## 🚀 Quick Start
@@ -88,8 +90,8 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
 ### 2. Install
 
 ```bash
-git clone https://github.com/JessyTsui/Claude-Code-Remote.git
-cd Claude-Code-Remote
+git clone https://github.com/oliverhuynh/ultimate-code-remote.git
+cd ultimate-code-remote
 npm install
 ```
 
@@ -125,7 +127,7 @@ IMAP_USER=your-email@gmail.com
 IMAP_PASS=your-app-password
 EMAIL_TO=your-notification-email@gmail.com
 ALLOWED_SENDERS=your-notification-email@gmail.com
-SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
+SESSION_MAP_PATH=/your/path/to/ultimate-code-remote/src/data/session-map.json
 ```
 
 📌 **Gmail users**: Use [App Passwords](https://myaccount.google.com/security), not your regular password.
@@ -150,7 +152,7 @@ To run tasks with the OpenAI Codex CLI instead of Claude Code, install and authe
 RUNNER=codex
 CODEX_BIN=codex
 CODEX_SANDBOX=read-only
-WORKDIR=/path/to/Claude-Code-Remote
+WORKDIR=/path/to/ultimate-code-remote
 ```
 
 **Workspace-write sandbox example**
@@ -158,7 +160,7 @@ WORKDIR=/path/to/Claude-Code-Remote
 RUNNER=codex
 CODEX_BIN=codex
 CODEX_SANDBOX=workspace-write
-WORKDIR=/path/to/Claude-Code-Remote
+WORKDIR=/path/to/ultimate-code-remote
 ```
 
 **Optional flags**
@@ -268,6 +270,10 @@ You can run repo/session listing commands directly in Telegram:
 /work-on <TOKEN>
 ```
 
+**Token behavior**
+- Tokens do not expire.
+- Set a working token with `/work-on <TOKEN>` or `/repo work-on --repo <name>` to send commands without repeating the token.
+
 **Manual Setup:**
 1. Create bot via [@BotFather](https://t.me/BotFather)
 2. Get your Chat ID from bot API
@@ -279,7 +285,7 @@ TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=your-bot-token-here
 TELEGRAM_CHAT_ID=your-chat-id-here
 TELEGRAM_WEBHOOK_URL=https://your-ngrok-url.app
-SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
+SESSION_MAP_PATH=/your/path/to/ultimate-code-remote/src/data/session-map.json
 ```
 
 **Optional Telegram settings:**
@@ -321,7 +327,7 @@ Create hooks configuration file:
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "node /your/path/to/Claude-Code-Remote/claude-hook-notify.js completed",
+        "command": "node /your/path/to/ultimate-code-remote/claude-hook-notify.js completed",
         "timeout": 5
       }]
     }],
@@ -329,7 +335,7 @@ Create hooks configuration file:
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "node /your/path/to/Claude-Code-Remote/claude-hook-notify.js waiting",
+        "command": "node /your/path/to/ultimate-code-remote/claude-hook-notify.js waiting",
         "timeout": 5
       }]
     }]
@@ -340,7 +346,7 @@ Create hooks configuration file:
 **Method 2: Project-Specific Configuration**
 ```bash
 # Set environment variable
-export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
+export CLAUDE_HOOKS_CONFIG=/your/path/to/ultimate-code-remote/claude-hooks.json
 ```
 
 > **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
@@ -408,14 +414,14 @@ node claude-hook-notify.js completed
 
 ## 🎮 How It Works
 
-1. **Use Claude normally** in tmux session
-2. **Get notifications** when Claude completes tasks via:
+1. **Use your AI normally** in tmux session
+2. **Get notifications** when the AI completes tasks via:
    - 🔊 **Sound alert** (Desktop)
    - 📧 **Email notification with execution trace** (if enabled)
    - 📱 **Telegram message with buttons** (if enabled)
    - 💬 **LINE message** (if enabled)
 3. **Reply with commands** using any platform
-4. **Commands execute automatically** in Claude
+4. **Commands execute automatically** in the AI session
 
 ### Platform Command Formats
 
@@ -434,9 +440,16 @@ Click smart button to get format:
 
 **LINE:**
 ```
-Reply to notification with: Your command here
-(Token automatically extracted from conversation context)
+Token ABC12345 your command here
+Or set a working token first, then just send: your command here
 ```
+
+**Reply format (Telegram/LINE):**
+```
+📝 Reply on [TOKEN] your command preview:
+<response body>
+```
+If the token matches your working token, the header is omitted for a cleaner reply. Long responses are split into multiple messages instead of being truncated.
 
 **Local fallback (no tmux)**  
 - 默认 `INJECTION_MODE=pty`：命令通过 PTY/智能粘贴注入，不依赖 tmux  
@@ -597,7 +610,7 @@ DEBUG=true node claude-hook-notify.js completed
 
 Found a bug or have a feature request? 
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/JessyTsui/Claude-Code-Remote/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/oliverhuynh/ultimate-code-remote/issues)
 - 🐦 **Updates**: Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) on Twitter
 - 💬 **Discussions**: Share your use cases and improvements
 
@@ -611,7 +624,7 @@ MIT License - Feel free to use and modify!
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=JessyTsui/Claude-Code-Remote&type=Date)](https://star-history.com/#JessyTsui/Claude-Code-Remote&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=oliverhuynh/ultimate-code-remote&type=Date)](https://star-history.com/#oliverhuynh/ultimate-code-remote&Date)
 
 ⭐ **Star this repo** if it helps you code more efficiently!
 
