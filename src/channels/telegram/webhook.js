@@ -192,14 +192,29 @@ class TelegramWebhookHandler {
             if (result && result.finalText) {
                 const formatted = formatTelegramResponse(this.runner.name, command, result.finalText, 3500);
                 const workingToken = currentTokenStore.getToken(this._getChatKey(chatId));
-                const responseText = workingToken && workingToken === token
-                    ? formatted.responseBody
-                    : `📝 Reply on [${token}] ${formatted.commandText}:\n${formatted.responseBody}`;
                 const parseMode = formatted.parseMode || 'Markdown';
+                const header = workingToken && workingToken === token
+                    ? ''
+                    : `📝 Reply on [${token}] ${formatted.commandText}:\n`;
+                const maxLength = 3500;
+                const firstChunkMax = header ? Math.max(0, maxLength - header.length) : maxLength;
+                const chunks = formatted.responseChunks || [''];
+                let firstChunk = chunks.length ? chunks[0] : '';
+                let remaining = chunks.length > 1 ? chunks.slice(1) : [];
+                if (firstChunk.length > firstChunkMax) {
+                    const overflow = firstChunk.slice(firstChunkMax);
+                    firstChunk = firstChunk.slice(0, firstChunkMax);
+                    remaining = [overflow, ...remaining];
+                }
+                const firstMessage = `${header}${firstChunk}`;
                 const text = parseMode === 'HTML'
-                    ? responseText.replace(/\*/g, '')
-                    : responseText;
+                    ? firstMessage.replace(/\*/g, '')
+                    : firstMessage;
                 await this._sendMessage(chatId, text, { parse_mode: parseMode });
+                for (const chunk of remaining) {
+                    const body = parseMode === 'HTML' ? chunk.replace(/\*/g, '') : chunk;
+                    await this._sendMessage(chatId, body, { parse_mode: parseMode });
+                }
             } else {
                 await this._sendMessage(chatId, 
                     `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nAI is now processing your request...`,

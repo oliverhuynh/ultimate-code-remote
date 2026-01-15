@@ -178,16 +178,32 @@ class LINEWebhookHandler {
             }
 
             if (result && result.finalText) {
-                const responseBody = formatLineResponse(this.runner.name, result.finalText, 1500);
+                const responseChunks = formatLineResponse(this.runner.name, result.finalText, 1500);
                 const previewLength = 50;
                 const commandPreview = command.length > previewLength
                     ? `${command.slice(0, previewLength)}...`
                     : command;
                 const workingToken = currentTokenStore.getToken(this._getChatKey(userId, groupId));
-                const responseText = workingToken && workingToken === token
-                    ? responseBody
-                    : `📝 Reply on [${token}] ${commandPreview}:\n${responseBody}`;
-                await this._replyMessage(replyToken, responseText);
+                const header = workingToken && workingToken === token
+                    ? ''
+                    : `📝 Reply on [${token}] ${commandPreview}:\n`;
+                const maxLength = 1500;
+                const firstChunkMax = header ? Math.max(0, maxLength - header.length) : maxLength;
+                const chunks = responseChunks || [''];
+                let firstChunk = chunks.length ? chunks[0] : '';
+                let remaining = chunks.length > 1 ? chunks.slice(1) : [];
+                if (firstChunk.length > firstChunkMax) {
+                    const overflow = firstChunk.slice(firstChunkMax);
+                    firstChunk = firstChunk.slice(0, firstChunkMax);
+                    remaining = [overflow, ...remaining];
+                }
+                const messages = [];
+                const firstMessage = `${header}${firstChunk}`;
+                messages.push(firstMessage);
+                for (const chunk of remaining) {
+                    messages.push(chunk);
+                }
+                await this._replyMessage(replyToken, messages);
             } else {
                 await this._replyMessage(replyToken, 
                     `✅ 指令已發送\n\n📝 指令: ${command}\n🖥️ 會話: ${tmuxSession}\n\n請稍候，AI 正在處理您的請求...`);
@@ -244,14 +260,15 @@ class LINEWebhookHandler {
 
     async _replyMessage(replyToken, text) {
         try {
+            const texts = Array.isArray(text) ? text : [text];
             await axios.post(
                 'https://api.line.me/v2/bot/message/reply',
                 {
                     replyToken: replyToken,
-                    messages: [{
+                    messages: texts.map((message) => ({
                         type: 'text',
-                        text: text
-                    }]
+                        text: message
+                    }))
                 },
                 {
                     headers: {

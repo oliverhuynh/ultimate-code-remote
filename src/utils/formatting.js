@@ -4,6 +4,16 @@ function truncateText(text, maxLength) {
     return text.slice(0, maxLength - 3) + '...';
 }
 
+function splitText(text, maxLength) {
+    if (!text) return [''];
+    if (!maxLength || text.length <= maxLength) return [text];
+    const chunks = [];
+    for (let i = 0; i < text.length; i += maxLength) {
+        chunks.push(text.slice(i, i + maxLength));
+    }
+    return chunks;
+}
+
 function escapeTelegramMarkdown(text) {
     if (!text) return '';
     return text
@@ -39,30 +49,32 @@ function escapeHtml(text) {
 
 function formatTelegramResponse(runnerName, command, finalText, maxLength = 3500) {
     if (runnerName === 'codex') {
+        const escaped = escapeHtml(finalText || '');
         return {
             parseMode: 'HTML',
             commandText: escapeHtml(command),
-            responseBody: escapeHtml(truncateText(finalText, maxLength))
+            responseChunks: splitText(escaped, maxLength)
         };
     }
 
     return {
         parseMode: 'Markdown',
         commandText: command || '',
-        responseBody: finalText || ''
+        responseChunks: splitText(finalText || '', maxLength)
     };
 }
 
 function formatLineResponse(runnerName, finalText, maxLength = 1500) {
     if (runnerName === 'codex') {
-        return truncateText(finalText, maxLength);
+        return splitText(finalText || '', maxLength);
     }
 
-    return finalText || '';
+    return splitText(finalText || '', maxLength);
 }
 
 module.exports = {
     truncateText,
+    splitText,
     escapeTelegramMarkdown,
     escapeHtml,
     formatTelegramResponse,
