@@ -224,12 +224,7 @@ async function injectCommandRemote(token, command) {
         return false;
     }
     
-    // Check if session has expired
-    const now = Math.floor(Date.now() / 1000);
-    if (session.expiresAt && session.expiresAt < now) {
-        log.warn({ token }, 'Session expired');
-        return false;
-    }
+    // Tokens never expire.
     
     try {
         log.info({ token, command }, 'Starting remote command injection');

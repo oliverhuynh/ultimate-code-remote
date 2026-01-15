@@ -13,6 +13,7 @@ const ControllerInjector = require('../../utils/controller-injector');
 const { createRunner } = require('../../runners');
 const { formatLineResponse } = require('../../utils/formatting');
 const sessionStore = require('../../utils/session-store');
+const currentTokenStore = require('../../utils/current-token-store');
 
 class LINEWebhookHandler {
     constructor(config = {}) {
@@ -105,7 +106,7 @@ class LINEWebhookHandler {
         if (messageText.startsWith('repo work-on')) {
             const match = messageText.match(/^repo work-on\s+--repo\s+([^\s]+)$/i);
             const repoName = match ? match[1] : null;
-            await this._repoWorkOn(replyToken, repoName);
+            await this._repoWorkOn(replyToken, repoName, userId, groupId);
             return;
         }
 
@@ -123,32 +124,41 @@ class LINEWebhookHandler {
             return;
         }
 
-        // Parse command
-        const commandMatch = messageText.match(/^Token\s+([A-Z0-9]{8})\s+(.+)$/i);
-        if (!commandMatch) {
-            await this._replyMessage(replyToken, 
-                '❌ 格式錯誤。請使用:\nToken <8位Token> <您的指令>\n\n例如:\nToken ABC12345 請幫我分析這段程式碼');
+        if (messageText.startsWith('work-on')) {
+            const match = messageText.match(/^work-on\s+([A-Z0-9]{8})$/i);
+            const token = match ? match[1].toUpperCase() : null;
+            await this._setWorkOn(replyToken, userId, token);
             return;
         }
 
-        const token = commandMatch[1].toUpperCase();
-        const command = commandMatch[2];
+        // Parse command
+        const commandMatch = messageText.match(/^Token\s+([A-Z0-9]{8})\s+(.+)$/i);
+        let token = null;
+        let command = null;
+        if (commandMatch) {
+            token = commandMatch[1].toUpperCase();
+            command = commandMatch[2];
+        } else {
+            const workingToken = currentTokenStore.getToken(this._getChatKey(userId, groupId));
+            if (workingToken) {
+                token = workingToken;
+                command = messageText;
+            } else {
+                await this._replyMessage(replyToken, 
+                    '❌ 格式錯誤。請使用:\nToken <8位Token> <您的指令>\n\n例如:\nToken ABC12345 請幫我分析這段程式碼');
+                return;
+            }
+        }
 
         // Find session by token
         const session = await this._findSessionByToken(token);
         if (!session) {
             await this._replyMessage(replyToken, 
-                '❌ Token 無效或已過期。請等待新的任務通知。');
+                '❌ Token 無效。請等待新的任務通知。');
             return;
         }
 
-        // Check if session is expired
-        if (session.expiresAt < Math.floor(Date.now() / 1000)) {
-            await this._replyMessage(replyToken, 
-                '❌ Token 已過期。請等待新的任務通知。');
-            await this._removeSession(session.id);
-            return;
-        }
+        // Tokens never expire.
 
         try {
             const tmuxSession = session.tmuxSession || 'default';
@@ -169,7 +179,14 @@ class LINEWebhookHandler {
 
             if (result && result.finalText) {
                 const responseBody = formatLineResponse(this.runner.name, result.finalText, 1500);
-                const responseText = `✅ 任務完成\n\n📝 指令: ${command}\n\n🤖 AI 回應:\n${responseBody}`;
+                const previewLength = 50;
+                const commandPreview = command.length > previewLength
+                    ? `${command.slice(0, previewLength)}...`
+                    : command;
+                const workingToken = currentTokenStore.getToken(this._getChatKey(userId, groupId));
+                const responseText = workingToken && workingToken === token
+                    ? responseBody
+                    : `📝 Reply on [${token}] ${commandPreview}:\n${responseBody}`;
                 await this._replyMessage(replyToken, responseText);
             } else {
                 await this._replyMessage(replyToken, 
@@ -289,17 +306,38 @@ class LINEWebhookHandler {
         }
     }
 
-    async _repoWorkOn(replyToken, repoName) {
+    async _repoWorkOn(replyToken, repoName, userId, groupId) {
         try {
             if (!repoName) {
                 await this._replyMessage(replyToken, 'Usage: repo work-on --repo <name>');
                 return;
             }
             const result = sessionStore.createManualSession(repoName);
-            await this._replyMessage(replyToken, `✅ Token created: ${result.token}`);
+            currentTokenStore.setToken(this._getChatKey(userId, groupId), result.token);
+            await this._replyMessage(replyToken, `✅ Working token set: ${result.token}`);
         } catch (error) {
             await this._replyMessage(replyToken, `❌ 無法建立 token: ${error.message}`);
         }
+    }
+
+    async _setWorkOn(replyToken, userId, token) {
+        if (!token) {
+            await this._replyMessage(replyToken, 'Usage: work-on <TOKEN>');
+            return;
+        }
+        const session = await this._findSessionByToken(token);
+        if (!session) {
+            await this._replyMessage(replyToken, '❌ Token 無效。');
+            return;
+        }
+        currentTokenStore.setToken(this._getChatKey(userId), token);
+        await this._replyMessage(replyToken, `✅ Working token set: ${token}`);
+    }
+
+    _getChatKey(userId, groupId) {
+        if (userId) return `line:${userId}`;
+        if (groupId) return `line:${groupId}`;
+        return 'line:unknown';
     }
 
     start(port = 3000) {

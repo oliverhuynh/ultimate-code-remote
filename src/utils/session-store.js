@@ -206,9 +206,7 @@ function createManualSession(repoName) {
         token,
         type: 'manual',
         created: new Date().toISOString(),
-        expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         createdAt: Math.floor(Date.now() / 1000),
-        expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
         workdir: repo.path,
         project: repoName,
         notification: {

@@ -218,9 +218,7 @@ class TelegramChannel extends NotificationChannel {
             token: token,
             type: 'telegram',
             created: new Date().toISOString(),
-            expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Expires after 24 hours
             createdAt: Math.floor(Date.now() / 1000),
-            expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             tmuxSession: notification.metadata?.tmuxSession || 'default',
             workdir: process.env.WORKDIR || process.cwd(),
             project: notification.project,

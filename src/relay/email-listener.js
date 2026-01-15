@@ -10,6 +10,7 @@ const Logger = require('../core/logger');
 const fs = require('fs');
 const path = require('path');
 const sessionStore = require('../utils/session-store');
+const currentTokenStore = require('../utils/current-token-store');
 
 class EmailListener extends EventEmitter {
     constructor(config) {
@@ -229,8 +230,13 @@ class EmailListener extends EventEmitter {
                 return;
             }
 
-            // Extract session ID
-            const sessionId = this._extractSessionId(email);
+            // Extract session ID (fallback to current token by sender)
+            let sessionId = this._extractSessionId(email);
+            if (!sessionId) {
+                const senderKey = this._getSenderKey(email);
+                const workingToken = senderKey ? currentTokenStore.getToken(senderKey) : null;
+                sessionId = workingToken ? this._getSessionIdByToken(workingToken) : null;
+            }
             if (!sessionId) {
                 this.logger.warn(`No session ID found in email ${seqno}`);
                 return;
@@ -241,6 +247,11 @@ class EmailListener extends EventEmitter {
             if (!session) {
                 this.logger.warn(`Invalid session ID in email ${seqno}: ${sessionId}`);
                 return;
+            }
+
+            const senderKey = this._getSenderKey(email);
+            if (senderKey && session.token) {
+                currentTokenStore.setToken(senderKey, session.token);
             }
 
             // Extract command
@@ -340,6 +351,12 @@ class EmailListener extends EventEmitter {
         }
     }
 
+    _getSenderKey(email) {
+        const fromAddress = email.from?.value?.[0]?.address || '';
+        if (!fromAddress) return null;
+        return `email:${fromAddress.toLowerCase()}`;
+    }
+
     async _validateSession(sessionId) {
         try {
             const sessionData = sessionStore.getSessionById(sessionId);
@@ -347,16 +364,7 @@ class EmailListener extends EventEmitter {
                 return null;
             }
             
-            // Check if session has expired
-            const now = new Date();
-            const expires = new Date(sessionData.expires);
-            
-            if (now > expires) {
-                this.logger.debug(`Session ${sessionId} has expired`);
-                // Delete expired session
-                sessionStore.removeSession(sessionData.repoName, sessionId);
-                return null;
-            }
+            // Tokens never expire.
 
             // Check command count limit
             if (sessionData.commandCount >= sessionData.maxCommands) {

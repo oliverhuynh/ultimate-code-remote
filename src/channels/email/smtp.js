@@ -174,9 +174,7 @@ class EmailChannel extends NotificationChannel {
             token: token,
             type: 'pty',
             created: new Date().toISOString(),
-            expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Expires after 24 hours
             createdAt: Math.floor(Date.now() / 1000),
-            expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             cwd: process.cwd(),
             workdir: process.env.WORKDIR || process.cwd(),
             notification: {
@@ -208,7 +206,6 @@ class EmailChannel extends NotificationChannel {
         sessionMap[token] = {
             type: 'pty',
             createdAt: Math.floor(Date.now() / 1000),
-            expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             cwd: process.cwd(),
             sessionId: sessionId,
             tmuxSession: tmuxSession,
@@ -462,7 +459,7 @@ Example Replies:
 • "Explain the purpose of this function"
 
 Session ID: {{sessionId}}
-Security Note: Please do not forward this email, session will automatically expire after 24 hours
+Security Note: Please do not forward this email.
                 `
             },
             waiting: {
@@ -523,7 +520,7 @@ Security Note: Please do not forward this email, session will automatically expi
                                 <span style="color: #999;">$</span> <span style="color: #666;">echo $SESSION_INFO</span><br>
                                 <div style="margin-left: 20px; margin-top: 5px;">
                                     SESSION_ID={{sessionId}}<br>
-                                    EXPIRES_IN=24h<br>
+                                    EXPIRES_IN=never<br>
                                     SECURITY=Do not forward this email<br>
                                     POWERED_BY=Claude-Code-Remote
                                 </div>
@@ -544,7 +541,7 @@ Status: {{type}}
 The AI needs your further guidance. Please reply to this email to tell the AI what to do next.
 
 Session ID: {{sessionId}}
-Security Note: Please do not forward this email, session will automatically expire after 24 hours
+Security Note: Please do not forward this email.
                 `
             }
         };

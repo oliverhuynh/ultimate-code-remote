@@ -165,19 +165,12 @@ class TelegramWebhookHandler {
         const session = await this._findSessionByToken(token);
         if (!session) {
             await this._sendMessage(chatId, 
-                '❌ Invalid or expired token. Please wait for a new task notification.',
+                '❌ Invalid token. Please wait for a new task notification.',
                 { parse_mode: 'Markdown' });
             return;
         }
 
-        // Check if session is expired
-        if (session.expiresAt < Math.floor(Date.now() / 1000)) {
-            await this._sendMessage(chatId, 
-                '❌ Token has expired. Please wait for a new task notification.',
-                { parse_mode: 'Markdown' });
-            await this._removeSession(session.id);
-            return;
-        }
+        // Tokens never expire.
 
         try {
             const tmuxSession = session.tmuxSession || 'default';
@@ -198,7 +191,10 @@ class TelegramWebhookHandler {
 
             if (result && result.finalText) {
                 const formatted = formatTelegramResponse(this.runner.name, command, result.finalText, 3500);
-                const responseText = `✅ *Task Completed*\n\n📝 *Command:* ${formatted.commandText}\n\n🤖 *AI Response:*\n${formatted.responseBody}`;
+                const workingToken = currentTokenStore.getToken(this._getChatKey(chatId));
+                const responseText = workingToken && workingToken === token
+                    ? formatted.responseBody
+                    : `📝 Reply on [${token}] ${formatted.commandText}:\n${formatted.responseBody}`;
                 const parseMode = formatted.parseMode || 'Markdown';
                 const text = parseMode === 'HTML'
                     ? responseText.replace(/\*/g, '')
@@ -274,7 +270,7 @@ class TelegramWebhookHandler {
             `\`/cmd ABC12345 analyze the performance of this function\`\n\n` +
             `*Tips:*\n` +
             `• Tokens are case-insensitive\n` +
-            `• Tokens expire after 24 hours\n` +
+            `• Tokens do not expire\n` +
             `• You can also just type \`TOKEN command\` without /cmd`;
         
         await this._sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -346,7 +342,7 @@ class TelegramWebhookHandler {
         }
         const session = await this._findSessionByToken(token);
         if (!session) {
-            await this._sendMessage(chatId, '❌ Invalid or expired token.');
+            await this._sendMessage(chatId, '❌ Invalid token.');
             return;
         }
         currentTokenStore.setToken(this._getChatKey(chatId), token);
