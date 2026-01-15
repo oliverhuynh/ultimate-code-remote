@@ -34,6 +34,9 @@ This project is based on and inspired by [Claude-Code-Remote](https://github.com
 - **🔄 Two-way Control**: Reply to messages or emails to send new commands
 - **📱 Remote Access**: Control your AI from anywhere
 - **🔒 Secure**: ID-based whitelist verification for all platforms
+- **🔐 Webhook Hardening**: APP_SECRET + Telegram secret header verification
+- **🧪 Email Sender Verification**: SPF/DKIM/DMARC enforcement with strict/relaxed modes
+- **🧹 Redaction**: Secrets automatically redacted in replies and notifications
 - **👥 Group Support**: Use in LINE groups or Telegram groups for team collaboration
 - **🤖 Smart Commands**: Intuitive command formats for each platform
 - **📋 Multi-line Support**: Send complex commands with formatting
@@ -141,6 +144,7 @@ IMAP_PASS=your-app-password
 EMAIL_TO=your-notification-email@gmail.com
 ALLOWED_SENDERS=your-notification-email@gmail.com
 SESSION_MAP_PATH=/your/path/to/ultimate-code-remote/src/data/session-map.json
+EMAIL_AUTH_MODE=strict
 ```
 
 📌 **Gmail users**: Use [App Passwords](https://myaccount.google.com/security), not your regular password.
@@ -152,6 +156,44 @@ SESSION_MAP_PATH=/your/path/to/ultimate-code-remote/src/data/session-map.json
 chmod +x setup-telegram.sh
 ./setup-telegram.sh
 ```
+
+### Security Hardening (Recommended)
+
+Add these to `.env`:
+
+```env
+# Webhook secret (shared across Telegram/LINE)
+# If not set, it will be generated in-memory when starting webhooks.
+# APP_SECRET=
+
+# Email sender verification
+EMAIL_AUTH_MODE=strict   # strict | relaxed
+
+# Rate limiting (lenient defaults)
+RATE_LIMIT_WINDOW_MS=300000
+RATE_LIMIT_PER_SENDER=60
+RATE_LIMIT_PER_SESSION=120
+
+# Command safety
+COMMAND_MAX_LENGTH=1000
+
+# Auto-approval (opt-in)
+AUTO_APPROVAL_ENABLED=false
+AUTO_APPROVAL_SECRET=change-me
+
+# Redaction
+REDACT_SECRETS=true
+# REDACT_KEYS=EXTRA_SECRET_1,EXTRA_SECRET_2
+
+# Outbound allowlist (comma-separated hostnames, supports *.domain)
+# If unset, defaults to api.telegram.org,api.line.me
+# OUTBOUND_ALLOWLIST=api.telegram.org,api.line.me
+```
+
+Notes:
+- **APP_SECRET** is required in webhook URLs and Telegram's secret header.
+- **EMAIL_AUTH_MODE=strict** hard-fails when SPF/DKIM/DMARC does not pass or headers are missing.
+- Set `EMAIL_AUTH_MODE=relaxed` if your provider omits auth headers (warnings will be logged).
 
 ### Using Codex (Optional Runner)
 

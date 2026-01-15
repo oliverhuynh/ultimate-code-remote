@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { createRunner } = require('../runners');
 const EmailChannel = require('../channels/email/smtp');
+const { redactText } = require('../utils/redact-secrets');
 
 class CommandRelayService extends EventEmitter {
     constructor(config) {
@@ -143,7 +144,7 @@ class CommandRelayService extends EventEmitter {
         this.logger.info(`Command queued:`, {
             id: queueItem.id,
             sessionId: queueItem.sessionId,
-            command: queueItem.command.substring(0, 50) + '...'
+            command: redactText(queueItem.command.substring(0, 50) + '...')
         });
 
         this.emit('commandQueued', queueItem);
@@ -187,7 +188,7 @@ class CommandRelayService extends EventEmitter {
     async _executeCommand(commandItem) {
         this.logger.info(`Executing command ${commandItem.id}:`, {
             sessionId: commandItem.sessionId,
-            command: commandItem.command.substring(0, 100)
+            command: redactText(commandItem.command.substring(0, 100))
         });
 
         commandItem.status = 'executing';
@@ -607,7 +608,7 @@ class CommandRelayService extends EventEmitter {
                 id: cmd.id,
                 status: cmd.status,
                 queuedAt: cmd.queuedAt,
-                command: cmd.command.substring(0, 50) + '...'
+                command: redactText(cmd.command.substring(0, 50) + '...')
             }))
         };
     }

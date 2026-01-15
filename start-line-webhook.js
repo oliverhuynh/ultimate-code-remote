@@ -8,6 +8,7 @@
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
+const crypto = require('crypto');
 const Logger = require('./src/core/logger');
 const LINEWebhookHandler = require('./src/channels/line/webhook');
 
@@ -17,7 +18,24 @@ if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
 }
 
+function generateAppSecret() {
+    const raw = crypto.randomBytes(24);
+    return raw.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function ensureAppSecret() {
+    if (process.env.APP_SECRET && process.env.APP_SECRET.trim()) {
+        return process.env.APP_SECRET.trim();
+    }
+
+    const secret = generateAppSecret();
+    process.env.APP_SECRET = secret;
+    console.log(`🔐 APP_SECRET generated for this session: ${secret}`);
+    return secret;
+}
+
 const logger = new Logger('LINE-Webhook-Server');
+ensureAppSecret();
 
 // Load configuration
 const config = {
@@ -26,7 +44,8 @@ const config = {
     userId: process.env.LINE_USER_ID,
     groupId: process.env.LINE_GROUP_ID,
     whitelist: process.env.LINE_WHITELIST ? process.env.LINE_WHITELIST.split(',').map(id => id.trim()) : [],
-    port: process.env.LINE_WEBHOOK_PORT || 3000
+    port: process.env.LINE_WEBHOOK_PORT || 3000,
+    appSecret: process.env.APP_SECRET
 };
 
 // Validate configuration

@@ -13,6 +13,10 @@ const { simpleParser } = require('mailparser');
 const { spawn } = require('node-pty');
 const { existsSync, readFileSync, writeFileSync } = require('fs');
 const pino = require('pino');
+const { isEmailAuthPass } = require('../utils/email-auth');
+const { isCommandSafe } = require('../utils/command-safety');
+const { redactText } = require('../utils/redact-secrets');
+const RateLimiter = require('../utils/rate-limiter');
 
 // Configure logging
 const log = pino({
@@ -33,6 +37,7 @@ const SENT_MESSAGES_PATH = path.join(__dirname, '../data/sent-messages.json');
 const ALLOWED_SENDERS = (process.env.ALLOWED_SENDERS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const PTY_POOL = new Map();
 let PROCESSED_MESSAGES = new Set();
+const rateLimiter = new RateLimiter();
 
 // Load processed messages
 function loadProcessedMessages() {
@@ -215,7 +220,7 @@ function deduplicateCommand(command) {
 }
 
 // Unattended remote command injection - tmux priority, smart fallback
-async function injectCommandRemote(token, command) {
+async function injectCommandRemote(token, command, options = {}) {
     const sessions = loadSessions();
     const session = sessions[token];
     
@@ -234,7 +239,9 @@ async function injectCommandRemote(token, command) {
         const tmuxSessionName = session.tmuxSession || 'claude-taskping';
         const tmuxInjector = new TmuxInjector(log, tmuxSessionName);
         
-        const tmuxResult = await tmuxInjector.injectCommandFull(token, command);
+        const tmuxResult = await tmuxInjector.injectCommandFull(token, command, {
+            allowAutoApprove: options.allowAutoApprove === true
+        });
         
         if (tmuxResult.success) {
             log.info({ token, session: tmuxResult.session }, 'Tmux remote injection successful');
@@ -388,6 +395,13 @@ async function fallbackToClipboard(command) {
 async function handleMailMessage(parsed) {
     try {
         log.debug({ uid: parsed.uid, messageId: parsed.messageId }, 'handleMailMessage called');
+
+        const authMode = (process.env.EMAIL_AUTH_MODE || 'strict').toLowerCase();
+        const authResult = isEmailAuthPass(parsed.headers, authMode);
+        if (!authResult.ok) {
+            log.warn({ reason: authResult.reason }, 'Email auth check failed');
+            return;
+        }
         
         // Check if this is a system-sent email
         const messageId = parsed.messageId;
@@ -453,11 +467,24 @@ async function handleMailMessage(parsed) {
             log.warn({ token }, 'No command found in email');
             return;
         }
+
+        if (!checkRateLimit(parsed.from?.text, token)) {
+            log.warn({ token }, 'Rate limit exceeded for sender/session');
+            return;
+        }
+
+        const maxLength = parseInt(process.env.COMMAND_MAX_LENGTH) || 1000;
+        if (!isCommandSafe(command, maxLength)) {
+            log.warn({ token }, 'Command rejected by safety checks');
+            return;
+        }
+
+        const { command: cleanCommand, allowAutoApprove } = extractAutoApproval(command);
         
-        log.info({ token, command }, 'Processing email command');
+        log.info({ token, command: redactText(command) }, 'Processing email command');
         
         // Unattended remote command injection (tmux priority, smart fallback)
-        const success = await injectCommandRemote(token, command);
+        const success = await injectCommandRemote(token, cleanCommand, { allowAutoApprove });
         
         if (!success) {
             log.warn({ token }, 'Could not inject command');
@@ -494,11 +521,50 @@ async function handleMailMessage(parsed) {
     }
 }
 
+function extractAutoApproval(command) {
+    const enabled = process.env.AUTO_APPROVAL_ENABLED === 'true';
+    const secret = process.env.AUTO_APPROVAL_SECRET;
+    if (!enabled || !secret) {
+        return { command, allowAutoApprove: false };
+    }
+
+    const marker = `AUTO_APPROVE:${secret}`;
+    if (!command.includes(marker)) {
+        return { command, allowAutoApprove: false };
+    }
+
+    const cleaned = command.replace(marker, '').trim();
+    return { command: cleaned, allowAutoApprove: true };
+}
+
+function checkRateLimit(sender, token) {
+    const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 300000;
+    const perSender = parseInt(process.env.RATE_LIMIT_PER_SENDER) || 60;
+    const perSession = parseInt(process.env.RATE_LIMIT_PER_SESSION) || 120;
+
+    if (sender) {
+        const senderKey = `email:${sender.toLowerCase()}`;
+        const senderCheck = rateLimiter.check(senderKey, perSender, windowMs);
+        if (!senderCheck.allowed) return false;
+    }
+
+    if (token) {
+        const tokenCheck = rateLimiter.check(`token:${token}`, perSession, windowMs);
+        if (!tokenCheck.allowed) return false;
+    }
+
+    return true;
+}
+
 // Start IMAP listening
 function startImap() {
     // First load processed messages
     loadProcessedMessages();
     
+    if ((process.env.EMAIL_AUTH_MODE || 'strict').toLowerCase() === 'strict') {
+        log.warn('EMAIL_AUTH_MODE=strict requires Authentication-Results headers; if your provider omits them, set EMAIL_AUTH_MODE=relaxed.');
+    }
+
     log.info('Starting relay-pty service', {
         mode: 'pty',
         imapHost: process.env.IMAP_HOST,

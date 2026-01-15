@@ -92,6 +92,9 @@ class SmartMonitor {
 
     autoApproveDialog() {
         try {
+            if (!this._isAutoApprovalEnabled()) {
+                return;
+            }
             console.log('🤖 Auto-approving Claude tool usage dialog...');
             
             // Send "1" to select the first option (usually "Yes")
@@ -104,6 +107,10 @@ class SmartMonitor {
         } catch (error) {
             console.error('❌ Failed to auto-approve dialog:', error.message);
         }
+    }
+
+    _isAutoApprovalEnabled() {
+        return process.env.AUTO_APPROVAL_ENABLED === 'true' && !!process.env.AUTO_APPROVAL_SECRET;
     }
 
     extractAllResponses(content) {

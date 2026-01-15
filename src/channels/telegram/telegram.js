@@ -11,6 +11,8 @@ const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
 const { execSync } = require('child_process');
 const sessionStore = require('../../utils/session-store');
+const { redactText } = require('../../utils/redact-secrets');
+const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
 
 class TelegramChannel extends NotificationChannel {
     constructor(config = {}) {
@@ -85,6 +87,7 @@ class TelegramChannel extends NotificationChannel {
         }
 
         try {
+            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/getMe`);
             const response = await axios.get(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/getMe`,
                 this._getNetworkOptions()
@@ -157,6 +160,7 @@ class TelegramChannel extends NotificationChannel {
         };
 
         try {
+            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`);
             const response = await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
                 requestData,
@@ -179,12 +183,13 @@ class TelegramChannel extends NotificationChannel {
         const status = type === 'completed' ? 'Completed' : 'Waiting for Input';
         
         let messageText = `${emoji} *AI Task ${status}*\n`;
-        messageText += `*Project:* ${notification.project}\n`;
+        messageText += `*Project:* ${redactText(notification.project)}\n`;
         messageText += `*Session Token:* \`${token}\`\n\n`;
         
         if (notification.metadata) {
             if (notification.metadata.userQuestion) {
-                messageText += `📝 *Your Question:*\n${notification.metadata.userQuestion.substring(0, 200)}`;
+                const safeQuestion = redactText(notification.metadata.userQuestion);
+                messageText += `📝 *Your Question:*\n${safeQuestion.substring(0, 200)}`;
                 if (notification.metadata.userQuestion.length > 200) {
                     messageText += '...';
                 }
@@ -192,7 +197,8 @@ class TelegramChannel extends NotificationChannel {
             }
             
             if (notification.metadata.claudeResponse) {
-                messageText += `🤖 *AI Response:*\n${notification.metadata.claudeResponse.substring(0, 300)}`;
+                const safeResponse = redactText(notification.metadata.claudeResponse);
+                messageText += `🤖 *AI Response:*\n${safeResponse.substring(0, 300)}`;
                 if (notification.metadata.claudeResponse.length > 300) {
                     messageText += '...';
                 }

@@ -6,6 +6,8 @@ const fs = require('fs');
 const http = require('http');
 const dotenv = require('dotenv');
 const Logger = require('../src/core/logger');
+const { enforceAllowedUrl } = require('../src/utils/outbound-allowlist');
+const crypto = require('crypto');
 
 const logger = new Logger('NgrokLauncher');
 const envPath = path.join(__dirname, '..', '.env');
@@ -13,6 +15,24 @@ const envPath = path.join(__dirname, '..', '.env');
 if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
 }
+
+function generateAppSecret() {
+    const raw = crypto.randomBytes(24);
+    return raw.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function ensureAppSecret() {
+    if (process.env.APP_SECRET && process.env.APP_SECRET.trim()) {
+        return process.env.APP_SECRET.trim();
+    }
+
+    const secret = generateAppSecret();
+    process.env.APP_SECRET = secret;
+    logger.info(`APP_SECRET generated for this session: ${secret}`);
+    return secret;
+}
+
+ensureAppSecret();
 
 const PORT = parseInt(process.env.TELEGRAM_WEBHOOK_PORT || '3001', 10);
 const NGROK_BIN = process.env.NGROK_BIN || 'ngrok';
@@ -38,6 +58,7 @@ function updateEnvWebhook(url) {
 
 function getNgrokUrl() {
     return new Promise((resolve, reject) => {
+        enforceAllowedUrl('http://127.0.0.1:4040/api/tunnels');
         const req = http.get('http://127.0.0.1:4040/api/tunnels', (res) => {
             let data = '';
             res.on('data', chunk => data += chunk.toString());
@@ -100,7 +121,12 @@ function setTelegramWebhook(url) {
     if (!token) return Promise.resolve();
 
     const https = require('https');
-    const payload = JSON.stringify({ url: `${url}/webhook/telegram` });
+    const secret = process.env.APP_SECRET;
+    const endpoint = secret ? `${url}/webhook/telegram/${secret}` : `${url}/webhook/telegram`;
+    const payload = JSON.stringify({
+        url: endpoint,
+        secret_token: secret || undefined
+    });
     const options = {
         method: 'POST',
         hostname: 'api.telegram.org',
@@ -112,6 +138,7 @@ function setTelegramWebhook(url) {
     };
 
     return new Promise((resolve, reject) => {
+        enforceAllowedUrl('https://api.telegram.org/bot/setWebhook');
         const req = https.request(options, (res) => {
             res.on('data', () => {});
             res.on('end', resolve);

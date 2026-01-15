@@ -14,6 +14,10 @@ const { createRunner } = require('../../runners');
 const { formatLineResponse } = require('../../utils/formatting');
 const sessionStore = require('../../utils/session-store');
 const currentTokenStore = require('../../utils/current-token-store');
+const { redactText } = require('../../utils/redact-secrets');
+const { isCommandSafe } = require('../../utils/command-safety');
+const RateLimiter = require('../../utils/rate-limiter');
+const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
 
 class LINEWebhookHandler {
     constructor(config = {}) {
@@ -23,6 +27,7 @@ class LINEWebhookHandler {
         this.injector = new ControllerInjector();
         this.runner = createRunner();
         this.app = express();
+        this.rateLimiter = new RateLimiter();
         
         this._setupMiddleware();
         this._setupRoutes();
@@ -30,7 +35,7 @@ class LINEWebhookHandler {
 
     _setupMiddleware() {
         // Parse raw body for signature verification
-        this.app.use('/webhook', express.raw({ type: 'application/json' }));
+        this.app.use(['/webhook', '/webhook/:secret'], express.raw({ type: 'application/json' }));
         
         // Parse JSON for other routes
         this.app.use(express.json());
@@ -39,6 +44,7 @@ class LINEWebhookHandler {
     _setupRoutes() {
         // LINE webhook endpoint
         this.app.post('/webhook', this._handleWebhook.bind(this));
+        this.app.post('/webhook/:secret', this._handleWebhook.bind(this));
         
         // Health check endpoint
         this.app.get('/health', (req, res) => {
@@ -61,6 +67,9 @@ class LINEWebhookHandler {
     }
 
     async _handleWebhook(req, res) {
+        if (!this._isWebhookAuthorized(req)) {
+            return res.status(401).send('Unauthorized');
+        }
         const signature = req.headers['x-line-signature'];
         
         // Validate signature
@@ -91,6 +100,11 @@ class LINEWebhookHandler {
         const messageText = event.message.text.trim();
         const replyToken = event.replyToken;
         
+        if (!this._checkRateLimit(userId, groupId)) {
+            await this._replyMessage(replyToken, '⏳ Rate limit exceeded. Please try again later.');
+            return;
+        }
+
         // Check if user is authorized
         if (!this._isAuthorized(userId, groupId)) {
             this.logger.warn(`Unauthorized user/group: ${userId || groupId}`);
@@ -148,6 +162,11 @@ class LINEWebhookHandler {
                     '❌ 格式錯誤。請使用:\nToken <8位Token> <您的指令>\n\n例如:\nToken ABC12345 請幫我分析這段程式碼');
                 return;
             }
+        }
+
+        if (!this._isCommandAllowed(command)) {
+            await this._replyMessage(replyToken, '⚠️ 指令已被安全檢查拒絕。');
+            return;
         }
 
         // Find session by token
@@ -243,6 +262,29 @@ class LINEWebhookHandler {
         return false;
     }
 
+    _isWebhookAuthorized(req) {
+        if (!this.config.appSecret) return true;
+        const pathSecret = req.params?.secret || req.query?.secret;
+        if (!pathSecret || pathSecret !== this.config.appSecret) {
+            this.logger.warn('LINE webhook secret mismatch');
+            return false;
+        }
+        return true;
+    }
+
+    _checkRateLimit(userId, groupId) {
+        const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 300000;
+        const perSender = parseInt(process.env.RATE_LIMIT_PER_SENDER) || 60;
+        const key = groupId ? `line:${groupId}` : `line:${userId}`;
+        const result = this.rateLimiter.check(key, perSender, windowMs);
+        return result.allowed;
+    }
+
+    _isCommandAllowed(command) {
+        const maxLength = parseInt(process.env.COMMAND_MAX_LENGTH) || 1000;
+        return isCommandSafe(command, maxLength);
+    }
+
     async _findSessionByToken(token) {
         try {
             return sessionStore.findSessionByToken(token);
@@ -260,6 +302,7 @@ class LINEWebhookHandler {
 
     async _replyMessage(replyToken, text) {
         try {
+            enforceAllowedUrl('https://api.line.me/v2/bot/message/reply');
             const texts = Array.isArray(text) ? text : [text];
             await axios.post(
                 'https://api.line.me/v2/bot/message/reply',
@@ -267,7 +310,7 @@ class LINEWebhookHandler {
                     replyToken: replyToken,
                     messages: texts.map((message) => ({
                         type: 'text',
-                        text: message
+                        text: redactText(message)
                     }))
                 },
                 {

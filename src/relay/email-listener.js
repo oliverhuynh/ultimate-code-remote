@@ -11,6 +11,10 @@ const fs = require('fs');
 const path = require('path');
 const sessionStore = require('../utils/session-store');
 const currentTokenStore = require('../utils/current-token-store');
+const { isEmailAuthPass } = require('../utils/email-auth');
+const { isCommandSafe } = require('../utils/command-safety');
+const { redactText } = require('../utils/redact-secrets');
+const RateLimiter = require('../utils/rate-limiter');
 
 class EmailListener extends EventEmitter {
     constructor(config) {
@@ -24,6 +28,7 @@ class EmailListener extends EventEmitter {
         this.sentMessagesPath = config.sentMessagesPath || path.join(__dirname, '../data/sent-messages.json');
         this.checkInterval = (config.template?.checkInterval || 30) * 1000; // Convert to milliseconds
         this.lastCheckTime = new Date();
+        this.rateLimiter = new RateLimiter();
         
         this._ensureDirectories();
     }
@@ -41,6 +46,9 @@ class EmailListener extends EventEmitter {
         }
 
         try {
+            if ((process.env.EMAIL_AUTH_MODE || 'strict').toLowerCase() === 'strict') {
+                this.logger.warn('EMAIL_AUTH_MODE=strict requires Authentication-Results headers; if your provider omits them, set EMAIL_AUTH_MODE=relaxed.');
+            }
             await this._connect();
             this._startListening();
             this.isListening = true;
@@ -216,6 +224,13 @@ class EmailListener extends EventEmitter {
 
     async _handleParsedEmail(email, seqno) {
         try {
+            const authMode = (process.env.EMAIL_AUTH_MODE || 'strict').toLowerCase();
+            const authResult = isEmailAuthPass(email.headers, authMode);
+            if (!authResult.ok) {
+                this.logger.warn(`Email auth failed (${authResult.reason}) for email ${seqno}`);
+                return;
+            }
+
             // First check if this is a system-sent email
             const messageId = email.headers.get('message-id');
             if (await this._isSystemSentEmail(messageId)) {
@@ -254,6 +269,11 @@ class EmailListener extends EventEmitter {
                 currentTokenStore.setToken(senderKey, session.token);
             }
 
+            if (!this._checkRateLimit(senderKey, sessionId)) {
+                this.logger.warn(`Rate limit exceeded for ${senderKey || 'unknown sender'}`);
+                return;
+            }
+
             // Extract command
             const command = this._extractCommand(email);
             if (!command) {
@@ -263,7 +283,7 @@ class EmailListener extends EventEmitter {
 
             // Security check
             if (!this._isCommandSafe(command)) {
-                this.logger.warn(`Unsafe command in email ${seqno}: ${command}`);
+            this.logger.warn(`Unsafe command in email ${seqno}: ${redactText(command)}`);
                 return;
             }
 
@@ -281,7 +301,7 @@ class EmailListener extends EventEmitter {
 
             this.logger.info(`Command extracted from email ${seqno}:`, {
                 sessionId,
-                command: command.substring(0, 100) + (command.length > 100 ? '...' : ''),
+                command: redactText(command.substring(0, 100) + (command.length > 100 ? '...' : '')),
                 from: email.from?.text
             });
 
@@ -423,27 +443,22 @@ class EmailListener extends EventEmitter {
     }
 
     _isCommandSafe(command) {
-        // Basic security check
-        if (command.length > 1000) {
-            return false;
+        const maxLength = parseInt(process.env.COMMAND_MAX_LENGTH) || 1000;
+        return isCommandSafe(command, maxLength);
+    }
+
+    _checkRateLimit(senderKey, sessionId) {
+        const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 300000;
+        const perSender = parseInt(process.env.RATE_LIMIT_PER_SENDER) || 60;
+        const perSession = parseInt(process.env.RATE_LIMIT_PER_SESSION) || 120;
+
+        if (senderKey) {
+            const sender = this.rateLimiter.check(`email:${senderKey}`, perSender, windowMs);
+            if (!sender.allowed) return false;
         }
-
-        // Dangerous command blacklist
-        const dangerousPatterns = [
-            /rm\s+-rf/i,
-            /sudo\s+/i,
-            /chmod\s+777/i,
-            />\s*\/dev\/null/i,
-            /curl.*\|\s*sh/i,
-            /wget.*\|\s*sh/i,
-            /eval\s*\(/i,
-            /exec\s*\(/i
-        ];
-
-        for (const pattern of dangerousPatterns) {
-            if (pattern.test(command)) {
-                return false;
-            }
+        if (sessionId) {
+            const session = this.rateLimiter.check(`email:session:${sessionId}`, perSession, windowMs);
+            if (!session.allowed) return false;
         }
 
         return true;

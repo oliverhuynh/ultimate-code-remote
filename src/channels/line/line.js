@@ -11,6 +11,8 @@ const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
 const { execSync } = require('child_process');
 const sessionStore = require('../../utils/session-store');
+const { redactText } = require('../../utils/redact-secrets');
+const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
 
 class LINEChannel extends NotificationChannel {
     constructor(config = {}) {
@@ -101,6 +103,7 @@ class LINEChannel extends NotificationChannel {
         };
 
         try {
+            enforceAllowedUrl(`${this.lineApiUrl}/push`);
             const response = await axios.post(
                 `${this.lineApiUrl}/push`,
                 requestData,
@@ -128,12 +131,13 @@ class LINEChannel extends NotificationChannel {
         const status = type === 'completed' ? '已完成' : '等待輸入';
         
         let messageText = `${emoji} AI 任務 ${status}\n`;
-        messageText += `專案: ${notification.project}\n`;
+        messageText += `專案: ${redactText(notification.project)}\n`;
         messageText += `會話 Token: ${token}\n\n`;
         
         if (notification.metadata) {
             if (notification.metadata.userQuestion) {
-                messageText += `📝 您的問題:\n${notification.metadata.userQuestion.substring(0, 200)}`;
+                const safeQuestion = redactText(notification.metadata.userQuestion);
+                messageText += `📝 您的問題:\n${safeQuestion.substring(0, 200)}`;
                 if (notification.metadata.userQuestion.length > 200) {
                     messageText += '...';
                 }
@@ -141,7 +145,8 @@ class LINEChannel extends NotificationChannel {
             }
             
             if (notification.metadata.claudeResponse) {
-                messageText += `🤖 AI 回應:\n${notification.metadata.claudeResponse.substring(0, 300)}`;
+                const safeResponse = redactText(notification.metadata.claudeResponse);
+                messageText += `🤖 AI 回應:\n${safeResponse.substring(0, 300)}`;
                 if (notification.metadata.claudeResponse.length > 300) {
                     messageText += '...';
                 }

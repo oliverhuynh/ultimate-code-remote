@@ -14,6 +14,10 @@ const { createRunner } = require('../../runners');
 const { formatTelegramResponse } = require('../../utils/formatting');
 const sessionStore = require('../../utils/session-store');
 const currentTokenStore = require('../../utils/current-token-store');
+const { redactText } = require('../../utils/redact-secrets');
+const { isCommandSafe } = require('../../utils/command-safety');
+const RateLimiter = require('../../utils/rate-limiter');
+const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -25,6 +29,7 @@ class TelegramWebhookHandler {
         this.app = express();
         this.apiBaseUrl = 'https://api.telegram.org';
         this.botUsername = null; // Cache for bot username
+        this.rateLimiter = new RateLimiter();
         
         this._setupMiddleware();
         this._setupRoutes();
@@ -38,6 +43,7 @@ class TelegramWebhookHandler {
     _setupRoutes() {
         // Telegram webhook endpoint
         this.app.post('/webhook/telegram', this._handleWebhook.bind(this));
+        this.app.post('/webhook/telegram/:secret', this._handleWebhook.bind(this));
 
         // Health check endpoint
         this.app.get('/health', (req, res) => {
@@ -59,6 +65,9 @@ class TelegramWebhookHandler {
 
     async _handleWebhook(req, res) {
         try {
+            if (!this._isWebhookAuthorized(req)) {
+                return res.status(401).send('Unauthorized');
+            }
             const update = req.body;
             
             // Handle different update types
@@ -81,6 +90,11 @@ class TelegramWebhookHandler {
         const messageText = message.text?.trim();
         
         if (!messageText) return;
+
+        if (!this._checkRateLimit(chatId, userId)) {
+            await this._sendMessage(chatId, '⏳ Rate limit exceeded. Please try again later.');
+            return;
+        }
 
         // Check if user is authorized
         if (!this._isAuthorized(userId, chatId)) {
@@ -161,6 +175,11 @@ class TelegramWebhookHandler {
     }
 
     async _processCommand(chatId, token, command) {
+        if (!this._isCommandAllowed(command)) {
+            await this._sendMessage(chatId, '⚠️ Command rejected by safety checks.');
+            return;
+        }
+
         // Find session by token
         const session = await this._findSessionByToken(token);
         if (!session) {
@@ -383,12 +402,45 @@ class TelegramWebhookHandler {
         return false;
     }
 
+    _isWebhookAuthorized(req) {
+        if (!this.config.appSecret) return true;
+
+        const pathSecret = req.params?.secret || req.query?.secret;
+        if (!pathSecret || pathSecret !== this.config.appSecret) {
+            this.logger.warn('Telegram webhook secret mismatch');
+            return false;
+        }
+
+        const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
+        if (!headerSecret || headerSecret !== this.config.appSecret) {
+            this.logger.warn('Telegram webhook header token mismatch');
+            return false;
+        }
+
+        return true;
+    }
+
+    _checkRateLimit(chatId, userId) {
+        const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 300000;
+        const perSender = parseInt(process.env.RATE_LIMIT_PER_SENDER) || 60;
+
+        const senderKey = `telegram:${chatId || userId}`;
+        const senderCheck = this.rateLimiter.check(senderKey, perSender, windowMs);
+        return senderCheck.allowed;
+    }
+
+    _isCommandAllowed(command) {
+        const maxLength = parseInt(process.env.COMMAND_MAX_LENGTH) || 1000;
+        return isCommandSafe(command, maxLength);
+    }
+
     async _getBotUsername() {
         if (this.botUsername) {
             return this.botUsername;
         }
 
         try {
+            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/getMe`);
             const response = await axios.get(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/getMe`,
                 this._getNetworkOptions()
@@ -422,23 +474,32 @@ class TelegramWebhookHandler {
     }
 
     async _sendMessage(chatId, text, options = {}) {
+        if (!text || !text.trim()) {
+            this.logger.warn('Skipped empty message');
+            return;
+        }
+        const safeText = redactText(text);
         try {
+            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`);
             await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
                 {
                     chat_id: chatId,
-                    text: text,
+                    text: safeText,
                     ...options
                 },
                 this._getNetworkOptions()
             );
         } catch (error) {
-            this.logger.error('Failed to send message:', error.response?.data || error.message);
+            const status = error.response?.status;
+            const data = error.response?.data;
+            this.logger.error('Failed to send message:', status ? { status, data } : (data || error.message));
         }
     }
 
     async _answerCallbackQuery(callbackQueryId, text = '') {
         try {
+            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/answerCallbackQuery`);
             await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/answerCallbackQuery`,
                 {
@@ -454,12 +515,19 @@ class TelegramWebhookHandler {
 
     async setWebhook(webhookUrl) {
         try {
+            const payload = {
+                url: webhookUrl,
+                allowed_updates: ['message', 'callback_query']
+            };
+
+            if (this.config.appSecret) {
+                payload.secret_token = this.config.appSecret;
+            }
+
+            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/setWebhook`);
             const response = await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/setWebhook`,
-                {
-                    url: webhookUrl,
-                    allowed_updates: ['message', 'callback_query']
-                },
+                payload,
                 this._getNetworkOptions()
             );
 

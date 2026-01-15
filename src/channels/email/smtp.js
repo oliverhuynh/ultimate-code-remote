@@ -11,6 +11,7 @@ const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
 const { execSync } = require('child_process');
 const sessionStore = require('../../utils/session-store');
+const { redactText } = require('../../utils/redact-secrets');
 
 class EmailChannel extends NotificationChannel {
     constructor(config = {}) {
@@ -274,8 +275,8 @@ class EmailChannel extends NotificationChannel {
         let claudeResponse = '';
         
         if (notification.metadata) {
-            userQuestion = notification.metadata.userQuestion || '';
-            claudeResponse = notification.metadata.claudeResponse || '';
+            userQuestion = redactText(notification.metadata.userQuestion || '');
+            claudeResponse = redactText(notification.metadata.claudeResponse || '');
         }
         
         // Limit user question length for title
@@ -324,19 +325,19 @@ class EmailChannel extends NotificationChannel {
         // Template variable replacement
         const variables = {
             project: projectDir,
-            message: notification.message,
+            message: redactText(notification.message),
             timestamp: timestamp,
             sessionId: sessionId,
             token: token,
             type: notification.type === 'completed' ? 'Task completed' : 'Waiting for input',
             userQuestion: userQuestion || 'No specified task',
-            claudeResponse: claudeResponse || notification.message,
+            claudeResponse: claudeResponse || redactText(notification.message),
             projectDir: projectDir,
             shortQuestion: shortQuestion || 'No specific question',
-            subagentActivities: notification.metadata?.subagentActivities || '',
+            subagentActivities: redactText(notification.metadata?.subagentActivities || ''),
             executionTraceSection: executionTraceSection,
             executionTraceText: executionTraceText,
-            fullExecutionTrace: notification.metadata?.fullExecutionTrace || 
+            fullExecutionTrace: redactText(notification.metadata?.fullExecutionTrace) || 
                 'No execution trace available. This may occur if the task completed very quickly or if tmux session logging is not enabled.'
         };
 

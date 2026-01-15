@@ -79,7 +79,7 @@ class TmuxInjector {
     }
     
     // Inject command into tmux session (intelligently handle Claude confirmations)
-    async injectCommand(command) {
+    async injectCommand(command, allowAutoApprove = false) {
         return new Promise(async (resolve) => {
             try {
                 // 1. Clear input field
@@ -135,7 +135,9 @@ class TmuxInjector {
                                     }
                                     
                                     // Wait and check if confirmation is needed
-                                    await this.handleConfirmations();
+                                    if (allowAutoApprove) {
+                                        await this.handleConfirmations();
+                                    }
                                     
                                     // Record injection log
                                     this.logInjection(command);
@@ -356,7 +358,7 @@ class TmuxInjector {
     }
     
     // Complete command injection workflow
-    async injectCommandFull(token, command) {
+    async injectCommandFull(token, command, options = {}) {
         try {
             this.log.debug(`Starting tmux command injection (Token: ${token})`);
             
@@ -379,7 +381,8 @@ class TmuxInjector {
             }
             
             // 3. Inject command
-            const injectResult = await this.injectCommand(command);
+            const allowAutoApprove = options.allowAutoApprove === true;
+            const injectResult = await this.injectCommand(command, allowAutoApprove);
             
             if (injectResult.success) {
                 // 4. Send success notification

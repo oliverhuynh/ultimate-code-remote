@@ -8,6 +8,7 @@
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
+const crypto = require('crypto');
 const Logger = require('./src/core/logger');
 const TelegramWebhookHandler = require('./src/channels/telegram/webhook');
 
@@ -17,7 +18,24 @@ if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
 }
 
+function generateAppSecret() {
+    const raw = crypto.randomBytes(24);
+    return raw.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function ensureAppSecret() {
+    if (process.env.APP_SECRET && process.env.APP_SECRET.trim()) {
+        return process.env.APP_SECRET.trim();
+    }
+
+    const secret = generateAppSecret();
+    process.env.APP_SECRET = secret;
+    console.log(`🔐 APP_SECRET generated for this session: ${secret}`);
+    return secret;
+}
+
 const logger = new Logger('Telegram-Webhook-Server');
+ensureAppSecret();
 
 // Load configuration
 const config = {
@@ -26,7 +44,8 @@ const config = {
     groupId: process.env.TELEGRAM_GROUP_ID,
     whitelist: process.env.TELEGRAM_WHITELIST ? process.env.TELEGRAM_WHITELIST.split(',').map(id => id.trim()) : [],
     port: process.env.TELEGRAM_WEBHOOK_PORT || 3001,
-    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL
+    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL,
+    appSecret: process.env.APP_SECRET
 };
 
 // Validate configuration
@@ -54,7 +73,9 @@ async function start() {
     // Set webhook if URL is provided
     if (config.webhookUrl) {
         try {
-            const webhookEndpoint = `${config.webhookUrl}/webhook/telegram`;
+            const webhookEndpoint = config.appSecret
+                ? `${config.webhookUrl}/webhook/telegram/${config.appSecret}`
+                : `${config.webhookUrl}/webhook/telegram`;
             logger.info(`Setting webhook to: ${webhookEndpoint}`);
             let attempts = 0;
             while (attempts < 3) {
@@ -75,12 +96,18 @@ async function start() {
         } catch (error) {
             logger.error('Failed to set webhook:', error.message);
             logger.info('You can manually set the webhook using:');
-            logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=${config.webhookUrl}/webhook/telegram"`);
+            const manualEndpoint = config.appSecret
+                ? `${config.webhookUrl}/webhook/telegram/${config.appSecret}`
+                : `${config.webhookUrl}/webhook/telegram`;
+            logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=${manualEndpoint}"`);
         }
     } else {
         logger.warn('TELEGRAM_WEBHOOK_URL not set. Please set the webhook manually.');
         logger.info('To set webhook manually, use:');
-        logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=https://your-domain.com/webhook/telegram"`);
+        const fallbackEndpoint = config.appSecret
+            ? `https://your-domain.com/webhook/telegram/${config.appSecret}`
+            : 'https://your-domain.com/webhook/telegram';
+        logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=${fallbackEndpoint}"`);
     }
     
     webhookHandler.start(config.port);

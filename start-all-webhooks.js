@@ -9,12 +9,31 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
+const crypto = require('crypto');
 
 // Load environment variables
 const envPath = path.join(__dirname, '.env');
 if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
 }
+
+function generateAppSecret() {
+    const raw = crypto.randomBytes(24);
+    return raw.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function ensureAppSecret() {
+    if (process.env.APP_SECRET && process.env.APP_SECRET.trim()) {
+        return process.env.APP_SECRET.trim();
+    }
+
+    const secret = generateAppSecret();
+    process.env.APP_SECRET = secret;
+    console.log(`🔐 APP_SECRET generated for this session: ${secret}`);
+    return secret;
+}
+
+ensureAppSecret();
 
 console.log('🚀 Starting Claude Code Remote Multi-Platform Webhook Server...\n');
 
