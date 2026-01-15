@@ -194,6 +194,15 @@ class CommandRelayService extends EventEmitter {
         commandItem.executedAt = new Date().toISOString();
 
         try {
+            const adminResponse = this._handleAdminCommand(commandItem.command);
+            if (adminResponse) {
+                await this._sendAdminResponse(commandItem, adminResponse);
+                commandItem.status = 'completed';
+                commandItem.completedAt = new Date().toISOString();
+                this.emit('commandExecuted', commandItem);
+                return;
+            }
+
             const sessionKey = `email:${commandItem.sessionId}`;
             const runnerContext = {
                 sessionKey,
@@ -203,7 +212,8 @@ class CommandRelayService extends EventEmitter {
                         throw new Error('Claude Code not available');
                     }
                     return this._sendCommandToClaudeCode(command, claudeProcess, commandItem.sessionId);
-                }
+                },
+                workdir: commandItem.session?.workdir
             };
 
             let result;
@@ -503,8 +513,8 @@ class CommandRelayService extends EventEmitter {
         const project = path.basename(process.cwd());
         return {
             type,
-            title: 'Claude Code - Task Completed',
-            message: `[${project}] Task completed, Claude is waiting for next instruction`,
+            title: 'AI Task - Completed',
+            message: `[${project}] Task completed, AI is waiting for next instruction`,
             project,
             metadata: {
                 userQuestion: commandItem.command,
@@ -518,6 +528,49 @@ class CommandRelayService extends EventEmitter {
             this.emailChannel = new EmailChannel(this.config);
         }
         return this.emailChannel;
+    }
+
+    _handleAdminCommand(command) {
+        const trimmed = command.trim();
+        if (trimmed === 'repo list') {
+            const repos = require('../utils/session-store').getRepos();
+            if (!repos.length) return 'No repos registered.';
+            return repos.map(repo => `${repo.name} -> ${repo.path}`).join('\n');
+        }
+
+        const sessionsMatch = trimmed.match(/^sessions list(?:\s+--repo\s+([^\s]+))?$/i);
+        if (sessionsMatch) {
+            const repoName = sessionsMatch[1] || null;
+            const entries = require('../utils/session-store').listTokens(repoName);
+            if (!entries.length) return 'No active sessions.';
+            return entries.map(([token, info]) => `${token} -> ${info.repoName} (${info.sessionId})`).join('\n');
+        }
+
+        const newMatch = trimmed.match(/^sessions new\s+--repo\s+([^\s]+)$/i);
+        if (newMatch) {
+            const repoName = newMatch[1];
+            const result = require('../utils/session-store').createManualSession(repoName);
+            return `Token created: ${result.token}`;
+        }
+
+        const repoWorkOnMatch = trimmed.match(/^repo work-on\s+--repo\s+([^\s]+)$/i);
+        if (repoWorkOnMatch) {
+            const repoName = repoWorkOnMatch[1];
+            const result = require('../utils/session-store').createManualSession(repoName);
+            return `Token created: ${result.token}`;
+        }
+
+        return null;
+    }
+
+    async _sendAdminResponse(commandItem, responseText) {
+        try {
+            const channel = this._getEmailChannel();
+            const notification = this._buildRunnerNotification(commandItem, responseText, 'completed');
+            await channel.send(notification);
+        } catch (error) {
+            this.logger.error('Failed to send admin email response:', error.message);
+        }
     }
 
     _handleCommandError(commandItem, error) {

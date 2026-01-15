@@ -12,12 +12,13 @@ const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
 const { createRunner } = require('../../runners');
 const { formatLineResponse } = require('../../utils/formatting');
+const sessionStore = require('../../utils/session-store');
 
 class LINEWebhookHandler {
     constructor(config = {}) {
         this.config = config;
         this.logger = new Logger('LINEWebhook');
-        this.sessionsDir = path.join(__dirname, '../../data/sessions');
+        this.sessionsDir = sessionStore.ROOT_DIR;
         this.injector = new ControllerInjector();
         this.runner = createRunner();
         this.app = express();
@@ -96,6 +97,32 @@ class LINEWebhookHandler {
             return;
         }
 
+        if (messageText === 'repo list') {
+            await this._sendRepoList(replyToken);
+            return;
+        }
+
+        if (messageText.startsWith('repo work-on')) {
+            const match = messageText.match(/^repo work-on\s+--repo\s+([^\s]+)$/i);
+            const repoName = match ? match[1] : null;
+            await this._repoWorkOn(replyToken, repoName);
+            return;
+        }
+
+        if (messageText.startsWith('sessions list')) {
+            const match = messageText.match(/^sessions list(?:\s+--repo\s+([^\s]+))?$/i);
+            const repoName = match ? match[1] : null;
+            await this._sendSessionsList(replyToken, repoName);
+            return;
+        }
+
+        if (messageText.startsWith('sessions new')) {
+            const match = messageText.match(/^sessions new\s+--repo\s+([^\s]+)$/i);
+            const repoName = match ? match[1] : null;
+            await this._sendSessionNew(replyToken, repoName);
+            return;
+        }
+
         // Parse command
         const commandMatch = messageText.match(/^Token\s+([A-Z0-9]{8})\s+(.+)$/i);
         if (!commandMatch) {
@@ -129,7 +156,8 @@ class LINEWebhookHandler {
             const runnerContext = {
                 sessionKey,
                 sessionName: tmuxSession,
-                injector: this.injector
+                injector: this.injector,
+                workdir: session.workdir
             };
 
             let result;
@@ -141,11 +169,11 @@ class LINEWebhookHandler {
 
             if (result && result.finalText) {
                 const responseBody = formatLineResponse(this.runner.name, result.finalText, 1500);
-                const responseText = `✅ 任務完成\n\n📝 指令: ${command}\n\n🤖 Claude 回應:\n${responseBody}`;
+                const responseText = `✅ 任務完成\n\n📝 指令: ${command}\n\n🤖 AI 回應:\n${responseBody}`;
                 await this._replyMessage(replyToken, responseText);
             } else {
                 await this._replyMessage(replyToken, 
-                    `✅ 指令已發送\n\n📝 指令: ${command}\n🖥️ 會話: ${tmuxSession}\n\n請稍候，Claude 正在處理您的請求...`);
+                    `✅ 指令已發送\n\n📝 指令: ${command}\n🖥️ 會話: ${tmuxSession}\n\n請稍候，AI 正在處理您的請求...`);
             }
 
             this.logger.info(`Command handled - User: ${userId}, Token: ${token}, Runner: ${this.runner.name}`);
@@ -183,29 +211,16 @@ class LINEWebhookHandler {
     }
 
     async _findSessionByToken(token) {
-        const files = fs.readdirSync(this.sessionsDir);
-        
-        for (const file of files) {
-            if (!file.endsWith('.json')) continue;
-            
-            const sessionPath = path.join(this.sessionsDir, file);
-            try {
-                const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-                if (session.token === token) {
-                    return session;
-                }
-            } catch (error) {
-                this.logger.error(`Failed to read session file ${file}:`, error.message);
-            }
+        try {
+            return sessionStore.findSessionByToken(token);
+        } catch (error) {
+            this.logger.error('Session lookup failed:', error.message);
+            return null;
         }
-        
-        return null;
     }
 
     async _removeSession(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (fs.existsSync(sessionFile)) {
-            fs.unlinkSync(sessionFile);
+        if (sessionStore.removeSession(sessionId)) {
             this.logger.debug(`Session removed: ${sessionId}`);
         }
     }
@@ -230,6 +245,60 @@ class LINEWebhookHandler {
             );
         } catch (error) {
             this.logger.error('Failed to reply message:', error.response?.data || error.message);
+        }
+    }
+
+    async _sendRepoList(replyToken) {
+        try {
+            const repos = sessionStore.getRepos();
+            if (!repos.length) {
+                await this._replyMessage(replyToken, '沒有已註冊的 repos。');
+                return;
+            }
+            const lines = repos.map(repo => `• ${repo.name} -> ${repo.path}`);
+            await this._replyMessage(replyToken, `📁 Repos:\n${lines.join('\n')}`);
+        } catch (error) {
+            await this._replyMessage(replyToken, `❌ 無法列出 repos: ${error.message}`);
+        }
+    }
+
+    async _sendSessionsList(replyToken, repoName = null) {
+        try {
+            const entries = sessionStore.listTokens(repoName);
+            if (!entries.length) {
+                await this._replyMessage(replyToken, '沒有啟用中的 sessions。');
+                return;
+            }
+            const lines = entries.map(([token, info]) => `• ${token} -> ${info.repoName} (${info.sessionId})`);
+            await this._replyMessage(replyToken, `🧾 Sessions:\n${lines.join('\n')}`);
+        } catch (error) {
+            await this._replyMessage(replyToken, `❌ 無法列出 sessions: ${error.message}`);
+        }
+    }
+
+    async _sendSessionNew(replyToken, repoName) {
+        try {
+            if (!repoName) {
+                await this._replyMessage(replyToken, 'Usage: sessions new --repo <name>');
+                return;
+            }
+            const result = sessionStore.createManualSession(repoName);
+            await this._replyMessage(replyToken, `✅ Token created: ${result.token}`);
+        } catch (error) {
+            await this._replyMessage(replyToken, `❌ 無法建立 token: ${error.message}`);
+        }
+    }
+
+    async _repoWorkOn(replyToken, repoName) {
+        try {
+            if (!repoName) {
+                await this._replyMessage(replyToken, 'Usage: repo work-on --repo <name>');
+                return;
+            }
+            const result = sessionStore.createManualSession(repoName);
+            await this._replyMessage(replyToken, `✅ Token created: ${result.token}`);
+        } catch (error) {
+            await this._replyMessage(replyToken, `❌ 無法建立 token: ${error.message}`);
         }
     }
 

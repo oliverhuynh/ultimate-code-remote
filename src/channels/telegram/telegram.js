@@ -10,11 +10,12 @@ const path = require('path');
 const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
 const { execSync } = require('child_process');
+const sessionStore = require('../../utils/session-store');
 
 class TelegramChannel extends NotificationChannel {
     constructor(config = {}) {
         super('telegram', config);
-        this.sessionsDir = path.join(__dirname, '../../data/sessions');
+        this.sessionsDir = sessionStore.ROOT_DIR;
         this.tmuxMonitor = new TmuxMonitor();
         this.apiBaseUrl = 'https://api.telegram.org';
         this.botUsername = null; // Cache for bot username
@@ -191,7 +192,7 @@ class TelegramChannel extends NotificationChannel {
             }
             
             if (notification.metadata.claudeResponse) {
-                messageText += `🤖 *Claude Response:*\n${notification.metadata.claudeResponse.substring(0, 300)}`;
+                messageText += `🤖 *AI Response:*\n${notification.metadata.claudeResponse.substring(0, 300)}`;
                 if (notification.metadata.claudeResponse.length > 300) {
                     messageText += '...';
                 }
@@ -207,6 +208,11 @@ class TelegramChannel extends NotificationChannel {
     }
 
     async _createSession(sessionId, notification, token) {
+        const repoName = sessionStore.getRepoNameByWorkdir(process.env.WORKDIR || process.cwd());
+        if (!repoName) {
+            throw new Error('Repo not registered. Run ultimate-code-remote repo add or repo init.');
+        }
+
         const session = {
             id: sessionId,
             token: token,
@@ -216,20 +222,20 @@ class TelegramChannel extends NotificationChannel {
             createdAt: Math.floor(Date.now() / 1000),
             expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             tmuxSession: notification.metadata?.tmuxSession || 'default',
+            workdir: process.env.WORKDIR || process.cwd(),
             project: notification.project,
             notification: notification
         };
 
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+        sessionStore.saveSession(repoName, session);
         
         this.logger.debug(`Session created: ${sessionId}`);
     }
 
     async _removeSession(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (fs.existsSync(sessionFile)) {
-            fs.unlinkSync(sessionFile);
+        // Repo name is stored in session index; removeSession expects repoName.
+        const session = sessionStore.getSessionById(sessionId);
+        if (session && sessionStore.removeSession(session.repoName, sessionId)) {
             this.logger.debug(`Session removed: ${sessionId}`);
         }
     }

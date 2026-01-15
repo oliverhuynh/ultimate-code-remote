@@ -10,12 +10,13 @@ const path = require('path');
 const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
 const { execSync } = require('child_process');
+const sessionStore = require('../../utils/session-store');
 
 class EmailChannel extends NotificationChannel {
     constructor(config = {}) {
         super('email', config);
         this.transporter = null;
-        this.sessionsDir = path.join(__dirname, '../../data/sessions');
+        this.sessionsDir = sessionStore.ROOT_DIR;
         this.templatesDir = path.join(__dirname, '../../assets/email-templates');
         this.sentMessagesPath = config.sentMessagesPath || path.join(__dirname, '../../data/sent-messages.json');
         this.tmuxMonitor = new TmuxMonitor();
@@ -163,6 +164,11 @@ class EmailChannel extends NotificationChannel {
     }
 
     async _createSession(sessionId, notification, token) {
+        const repoName = sessionStore.getRepoNameByWorkdir(process.env.WORKDIR || process.cwd());
+        if (!repoName) {
+            throw new Error('Repo not registered. Run ultimate-code-remote repo add or repo init.');
+        }
+
         const session = {
             id: sessionId,
             token: token,
@@ -172,6 +178,7 @@ class EmailChannel extends NotificationChannel {
             createdAt: Math.floor(Date.now() / 1000),
             expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             cwd: process.cwd(),
+            workdir: process.env.WORKDIR || process.cwd(),
             notification: {
                 type: notification.type,
                 project: notification.project,
@@ -182,8 +189,7 @@ class EmailChannel extends NotificationChannel {
             maxCommands: 10
         };
 
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+        sessionStore.saveSession(repoName, session);
         
         // Also save in PTY mapping format
         const sessionMapPath = process.env.SESSION_MAP_PATH || path.join(__dirname, '../../data/session-map.json');
@@ -221,9 +227,8 @@ class EmailChannel extends NotificationChannel {
     }
 
     async _removeSession(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (fs.existsSync(sessionFile)) {
-            fs.unlinkSync(sessionFile);
+        const session = sessionStore.getSessionById(sessionId);
+        if (session && sessionStore.removeSession(session.repoName, sessionId)) {
             this.logger.debug(`Session removed: ${sessionId}`);
         }
     }
@@ -366,7 +371,7 @@ class EmailChannel extends NotificationChannel {
         // Default templates
         const templates = {
             completed: {
-                subject: '[Claude-Code-Remote #{{token}}] Claude Code Task Completed - {{project}}',
+                subject: '[Claude-Code-Remote #{{token}}] AI Task Completed - {{project}}',
                 html: `
                 <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #f5f5f5; padding: 0; margin: 0;">
                     <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
@@ -392,7 +397,7 @@ class EmailChannel extends NotificationChannel {
                                 <div style="background-color: #262626; border-left: 4px solid #ff9800; padding: 15px 20px; margin-left: 20px; color: #f0f0f0; font-size: 15px; line-height: 1.6; font-weight: 500;">{{userQuestion}}</div>
                             </div>
                             
-                            <!-- Claude Response (Terminal Style) -->
+                            <!-- AI Response (Terminal Style) -->
                             <div style="margin-bottom: 30px;">
                                 <div style="color: #00ff00; margin-bottom: 10px;">
                                     <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code execute</span>
@@ -434,7 +439,7 @@ class EmailChannel extends NotificationChannel {
                 </div>
                 `,
                 text: `
-[Claude-Code-Remote #{{token}}] Claude Code Task Completed - {{projectDir}} | {{shortQuestion}}
+[Claude-Code-Remote #{{token}}] AI Task Completed - {{projectDir}} | {{shortQuestion}}
 
 Project: {{projectDir}}
 Time: {{timestamp}}
@@ -443,7 +448,7 @@ Status: {{type}}
 📝 Your Question:
 {{userQuestion}}
 
-🤖 Claude's Response:
+🤖 AI Response:
 {{claudeResponse}}
 
 {{subagentActivities}}{{executionTraceText}}
@@ -461,7 +466,7 @@ Security Note: Please do not forward this email, session will automatically expi
                 `
             },
             waiting: {
-                subject: '[Claude-Code-Remote #{{token}}] Claude Code Waiting for Input - {{project}}',
+                subject: '[Claude-Code-Remote #{{token}}] AI Waiting for Input - {{project}}',
                 html: `
                 <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #f5f5f5; padding: 0; margin: 0;">
                     <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
@@ -494,7 +499,7 @@ Security Note: Please do not forward this email, session will automatically expi
                             <div style="margin: 20px 0;">
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code wait</span><br>
                                 <div style="color: #ffeb3b; margin: 10px 0;">
-                                    <span style="color: #ff9800;">[WAITING]</span> Claude needs your input to continue...<br>
+                                    <span style="color: #ff9800;">[WAITING]</span> The AI needs your input to continue...<br>
                                 </div>
                                 <div style="background-color: #262626; border-left: 3px solid #ffeb3b; padding: 15px; margin: 10px 0; color: #f0f0f0;">
                                     {{message}}
@@ -507,7 +512,7 @@ Security Note: Please do not forward this email, session will automatically expi
                                 <div style="color: #f0f0f0; margin: 10px 0;">
                                     <div style="color: #ff9800; margin-bottom: 10px;">→ ACTION REQUIRED:</div>
                                     <div style="background-color: #262626; padding: 15px; border: 1px solid #333; margin: 10px 0;">
-                                        <span style="color: #ffeb3b;">Claude is waiting for your guidance.</span><br><br>
+                                        <span style="color: #ffeb3b;">The AI is waiting for your guidance.</span><br><br>
                                         Reply to this email with your instructions to continue.
                                     </div>
                                 </div>
@@ -528,7 +533,7 @@ Security Note: Please do not forward this email, session will automatically expi
                 </div>
                 `,
                 text: `
-[Claude-Code-Remote #{{token}}] Claude Code Waiting for Input - {{projectDir}}
+[Claude-Code-Remote #{{token}}] AI Waiting for Input - {{projectDir}}
 
 Project: {{projectDir}}
 Time: {{timestamp}}
@@ -536,7 +541,7 @@ Status: {{type}}
 
 ⏳ Waiting for Processing: {{message}}
 
-Claude needs your further guidance. Please reply to this email to tell Claude what to do next.
+The AI needs your further guidance. Please reply to this email to tell the AI what to do next.
 
 Session ID: {{sessionId}}
 Security Note: Please do not forward this email, session will automatically expire after 24 hours
@@ -599,9 +604,9 @@ Security Note: Please do not forward this email, session will automatically expi
 ✅ Test completed successfully!
 
 This is a test trace to demonstrate how the full execution trace will appear in actual usage.
-When Claude Code completes a task, this section will contain the complete terminal output including:
+When the AI completes a task, this section will contain the complete terminal output including:
 - User commands
-- Claude's responses
+- The AI's responses
 - Subagent activities
 - Error messages
 - Debug information

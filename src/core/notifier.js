@@ -172,32 +172,32 @@ class Notifier {
         this.i18n = {
             'zh-CN': {
                 completed: {
-                    title: 'Claude Code - Task Completed',
-                    message: '[{project}] Task completed, Claude is waiting for next instruction'
+                    title: 'AI Task - Completed',
+                    message: '[{project}] Task completed, AI is waiting for next instruction'
                 },
                 waiting: {
-                    title: 'Claude Code - Waiting for Input',
-                    message: '[{project}] Claude needs your further guidance'
+                    title: 'AI Task - Waiting for Input',
+                    message: '[{project}] AI needs your further guidance'
                 }
             },
             'en': {
                 completed: {
-                    title: 'Claude Code - Task Completed',
-                    message: '[{project}] Task completed, Claude is waiting for next instruction'
+                    title: 'AI Task - Completed',
+                    message: '[{project}] Task completed, AI is waiting for next instruction'
                 },
                 waiting: {
-                    title: 'Claude Code - Waiting for Input',
-                    message: '[{project}] Claude needs your further guidance'
+                    title: 'AI Task - Waiting for Input',
+                    message: '[{project}] AI needs your further guidance'
                 }
             },
             'ja': {
                 completed: {
-                    title: 'Claude Code - タスク完了',
-                    message: '[{project}] タスクが完了しました。Claudeが次の指示を待っています'
+                    title: 'AI タスク - 完了',
+                    message: '[{project}] タスクが完了しました。AIが次の指示を待っています'
                 },
                 waiting: {
-                    title: 'Claude Code - 入力待ち',
-                    message: '[{project}] Claudeにはあなたのさらなるガイダンスが必要です'
+                    title: 'AI タスク - 入力待ち',
+                    message: '[{project}] AIにはあなたのさらなるガイダンスが必要です'
                 }
             }
         };

@@ -2,7 +2,7 @@
 
 /**
  * Test Telegram Notification
- * Simulates Claude sending a notification via Telegram
+ * Simulates AI sending a notification via Telegram
  */
 
 const path = require('path');
@@ -36,7 +36,7 @@ async function testNotification() {
         project: 'claude-code-line',
         metadata: {
             userQuestion: '請幫我查詢這個代碼庫：https://github.com/JessyTsui/Claude-Code-Remote',
-            claudeResponse: '我已經查詢了這個代碼庫，這是一個 Claude Code Remote 項目，允許通過電子郵件遠程控制 Claude Code。',
+            claudeResponse: '我已經查詢了這個代碼庫，這是一個 Claude Code Remote 項目，允許通過電子郵件遠程控制 AI 會話。',
             tmuxSession: 'claude-test'
         }
     };

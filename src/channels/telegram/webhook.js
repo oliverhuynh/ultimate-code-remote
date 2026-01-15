@@ -12,12 +12,14 @@ const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
 const { createRunner } = require('../../runners');
 const { formatTelegramResponse } = require('../../utils/formatting');
+const sessionStore = require('../../utils/session-store');
+const currentTokenStore = require('../../utils/current-token-store');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
         this.config = config;
         this.logger = new Logger('TelegramWebhook');
-        this.sessionsDir = path.join(__dirname, '../../data/sessions');
+        this.sessionsDir = sessionStore.ROOT_DIR;
         this.injector = new ControllerInjector();
         this.runner = createRunner();
         this.app = express();
@@ -99,6 +101,39 @@ class TelegramWebhookHandler {
             return;
         }
 
+        if (messageText.startsWith('/work-on')) {
+            const match = messageText.match(/^\/work-on\s+([A-Z0-9]{8})$/i);
+            const token = match ? match[1].toUpperCase() : null;
+            await this._setWorkOn(chatId, token);
+            return;
+        }
+
+        if (messageText === '/repo list') {
+            await this._sendRepoList(chatId);
+            return;
+        }
+
+        if (messageText.startsWith('/repo work-on')) {
+            const match = messageText.match(/^\/repo work-on\s+--repo\s+([^\s]+)$/i);
+            const repoName = match ? match[1] : null;
+            await this._repoWorkOn(chatId, repoName);
+            return;
+        }
+
+        if (messageText.startsWith('/sessions list')) {
+            const match = messageText.match(/^\/sessions list(?:\s+--repo\s+([^\s]+))?$/i);
+            const repoName = match ? match[1] : null;
+            await this._sendSessionsList(chatId, repoName);
+            return;
+        }
+
+        if (messageText.startsWith('/sessions new')) {
+            const match = messageText.match(/^\/sessions new\s+--repo\s+([^\s]+)$/i);
+            const repoName = match ? match[1] : null;
+            await this._sendSessionNew(chatId, repoName);
+            return;
+        }
+
         // Parse command
         const commandMatch = messageText.match(/^\/cmd\s+([A-Z0-9]{8})\s+(.+)$/i);
         if (!commandMatch) {
@@ -107,6 +142,11 @@ class TelegramWebhookHandler {
             if (directMatch) {
                 await this._processCommand(chatId, directMatch[1], directMatch[2]);
             } else {
+                const workingToken = currentTokenStore.getToken(this._getChatKey(chatId));
+                if (workingToken) {
+                    await this._processCommand(chatId, workingToken, messageText);
+                    return;
+                }
                 await this._sendMessage(chatId, 
                     '❌ Invalid format. Use:\n`/cmd <TOKEN> <command>`\n\nExample:\n`/cmd ABC12345 analyze this code`',
                     { parse_mode: 'Markdown' });
@@ -145,7 +185,8 @@ class TelegramWebhookHandler {
             const runnerContext = {
                 sessionKey,
                 sessionName: tmuxSession,
-                injector: this.injector
+                injector: this.injector,
+                workdir: session.workdir
             };
 
             let result;
@@ -157,7 +198,7 @@ class TelegramWebhookHandler {
 
             if (result && result.finalText) {
                 const formatted = formatTelegramResponse(this.runner.name, command, result.finalText, 3500);
-                const responseText = `✅ *Task Completed*\n\n📝 *Command:* ${formatted.commandText}\n\n🤖 *Claude Response:*\n${formatted.responseBody}`;
+                const responseText = `✅ *Task Completed*\n\n📝 *Command:* ${formatted.commandText}\n\n🤖 *AI Response:*\n${formatted.responseBody}`;
                 const parseMode = formatted.parseMode || 'Markdown';
                 const text = parseMode === 'HTML'
                     ? responseText.replace(/\*/g, '')
@@ -165,7 +206,7 @@ class TelegramWebhookHandler {
                 await this._sendMessage(chatId, text, { parse_mode: parseMode });
             } else {
                 await this._sendMessage(chatId, 
-                    `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nClaude is now processing your request...`,
+                    `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nAI is now processing your request...`,
                     { parse_mode: 'Markdown' });
             }
 
@@ -210,7 +251,7 @@ class TelegramWebhookHandler {
 
     async _sendWelcomeMessage(chatId) {
         const message = `🤖 *Welcome to Claude Code Remote Bot!*\n\n` +
-            `I'll notify you when Claude completes tasks or needs input.\n\n` +
+            `I'll notify you when the AI completes tasks or needs input.\n\n` +
             `When you receive a notification with a token, you can send commands back using:\n` +
             `\`/cmd <TOKEN> <your command>\`\n\n` +
             `Type /help for more information.`;
@@ -219,11 +260,16 @@ class TelegramWebhookHandler {
     }
 
     async _sendHelpMessage(chatId) {
-        const message = `📚 *Claude Code Remote Bot Help*\n\n` +
+        const message = `📚 *AI Code Remote Bot Help*\n\n` +
             `*Commands:*\n` +
             `• \`/start\` - Welcome message\n` +
             `• \`/help\` - Show this help\n` +
-            `• \`/cmd <TOKEN> <command>\` - Send command to Claude\n\n` +
+            `• \`/cmd <TOKEN> <command>\` - Send command to the AI\n\n` +
+            `• \`/work-on <TOKEN>\` - Set default token for this chat\n` +
+            `• \`/repo list\` - List registered repos\n` +
+            `• \`/repo work-on --repo <name>\` - Create token and set it\n` +
+            `• \`/sessions list [--repo <name>]\` - List active tokens\n\n` +
+            `• \`/sessions new --repo <name>\` - Create a new token\n\n` +
             `*Example:*\n` +
             `\`/cmd ABC12345 analyze the performance of this function\`\n\n` +
             `*Tips:*\n` +
@@ -232,6 +278,79 @@ class TelegramWebhookHandler {
             `• You can also just type \`TOKEN command\` without /cmd`;
         
         await this._sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    }
+
+    _getChatKey(chatId) {
+        return `telegram:${chatId}`;
+    }
+
+    async _sendRepoList(chatId) {
+        try {
+            const repos = sessionStore.getRepos();
+            if (!repos.length) {
+                await this._sendMessage(chatId, 'No repos registered.');
+                return;
+            }
+            const lines = repos.map(repo => `• ${repo.name} -> ${repo.path}`);
+            await this._sendMessage(chatId, `📁 Repos:\n${lines.join('\n')}`);
+        } catch (error) {
+            await this._sendMessage(chatId, `❌ Failed to list repos: ${error.message}`);
+        }
+    }
+
+    async _sendSessionsList(chatId, repoName = null) {
+        try {
+            const entries = sessionStore.listTokens(repoName);
+            if (!entries.length) {
+                await this._sendMessage(chatId, 'No active sessions.');
+                return;
+            }
+            const lines = entries.map(([token, info]) => `• ${token} -> ${info.repoName} (${info.sessionId})`);
+            await this._sendMessage(chatId, `🧾 Sessions:\n${lines.join('\n')}`);
+        } catch (error) {
+            await this._sendMessage(chatId, `❌ Failed to list sessions: ${error.message}`);
+        }
+    }
+
+    async _sendSessionNew(chatId, repoName) {
+        try {
+            if (!repoName) {
+                await this._sendMessage(chatId, 'Usage: /sessions new --repo <name>');
+                return;
+            }
+            const result = sessionStore.createManualSession(repoName);
+            await this._sendMessage(chatId, `✅ Token created: ${result.token}`);
+        } catch (error) {
+            await this._sendMessage(chatId, `❌ Failed to create token: ${error.message}`);
+        }
+    }
+
+    async _repoWorkOn(chatId, repoName) {
+        try {
+            if (!repoName) {
+                await this._sendMessage(chatId, 'Usage: /repo work-on --repo <name>');
+                return;
+            }
+            const result = sessionStore.createManualSession(repoName);
+            currentTokenStore.setToken(this._getChatKey(chatId), result.token);
+            await this._sendMessage(chatId, `✅ Working token set: ${result.token}`);
+        } catch (error) {
+            await this._sendMessage(chatId, `❌ Failed to set work token: ${error.message}`);
+        }
+    }
+
+    async _setWorkOn(chatId, token) {
+        if (!token) {
+            await this._sendMessage(chatId, 'Usage: /work-on <TOKEN>');
+            return;
+        }
+        const session = await this._findSessionByToken(token);
+        if (!session) {
+            await this._sendMessage(chatId, '❌ Invalid or expired token.');
+            return;
+        }
+        currentTokenStore.setToken(this._getChatKey(chatId), token);
+        await this._sendMessage(chatId, `✅ Working token set: ${token}`);
     }
 
     _isAuthorized(userId, chatId) {
@@ -277,29 +396,16 @@ class TelegramWebhookHandler {
     }
 
     async _findSessionByToken(token) {
-        const files = fs.readdirSync(this.sessionsDir);
-        
-        for (const file of files) {
-            if (!file.endsWith('.json')) continue;
-            
-            const sessionPath = path.join(this.sessionsDir, file);
-            try {
-                const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-                if (session.token === token) {
-                    return session;
-                }
-            } catch (error) {
-                this.logger.error(`Failed to read session file ${file}:`, error.message);
-            }
+        try {
+            return sessionStore.findSessionByToken(token);
+        } catch (error) {
+            this.logger.error('Session lookup failed:', error.message);
+            return null;
         }
-        
-        return null;
     }
 
     async _removeSession(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (fs.existsSync(sessionFile)) {
-            fs.unlinkSync(sessionFile);
+        if (sessionStore.removeSession(sessionId)) {
             this.logger.debug(`Session removed: ${sessionId}`);
         }
     }

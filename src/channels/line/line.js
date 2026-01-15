@@ -10,11 +10,12 @@ const path = require('path');
 const fs = require('fs');
 const TmuxMonitor = require('../../utils/tmux-monitor');
 const { execSync } = require('child_process');
+const sessionStore = require('../../utils/session-store');
 
 class LINEChannel extends NotificationChannel {
     constructor(config = {}) {
         super('line', config);
-        this.sessionsDir = path.join(__dirname, '../../data/sessions');
+        this.sessionsDir = sessionStore.ROOT_DIR;
         this.tmuxMonitor = new TmuxMonitor();
         this.lineApiUrl = 'https://api.line.me/v2/bot/message';
         
@@ -126,7 +127,7 @@ class LINEChannel extends NotificationChannel {
         const emoji = type === 'completed' ? '✅' : '⏳';
         const status = type === 'completed' ? '已完成' : '等待輸入';
         
-        let messageText = `${emoji} Claude 任務 ${status}\n`;
+        let messageText = `${emoji} AI 任務 ${status}\n`;
         messageText += `專案: ${notification.project}\n`;
         messageText += `會話 Token: ${token}\n\n`;
         
@@ -140,7 +141,7 @@ class LINEChannel extends NotificationChannel {
             }
             
             if (notification.metadata.claudeResponse) {
-                messageText += `🤖 Claude 回應:\n${notification.metadata.claudeResponse.substring(0, 300)}`;
+                messageText += `🤖 AI 回應:\n${notification.metadata.claudeResponse.substring(0, 300)}`;
                 if (notification.metadata.claudeResponse.length > 300) {
                     messageText += '...';
                 }
@@ -150,7 +151,7 @@ class LINEChannel extends NotificationChannel {
         
         messageText += `💬 回覆此訊息並輸入:\n`;
         messageText += `Token ${token} <您的指令>\n`;
-        messageText += `來發送新指令給 Claude`;
+        messageText += `來發送新指令給 AI`;
 
         return [{
             type: 'text',
@@ -159,6 +160,11 @@ class LINEChannel extends NotificationChannel {
     }
 
     async _createSession(sessionId, notification, token) {
+        const repoName = sessionStore.getRepoNameByWorkdir(process.env.WORKDIR || process.cwd());
+        if (!repoName) {
+            throw new Error('Repo not registered. Run ultimate-code-remote repo add or repo init.');
+        }
+
         const session = {
             id: sessionId,
             token: token,
@@ -168,20 +174,19 @@ class LINEChannel extends NotificationChannel {
             createdAt: Math.floor(Date.now() / 1000),
             expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             tmuxSession: notification.metadata?.tmuxSession || 'default',
+            workdir: process.env.WORKDIR || process.cwd(),
             project: notification.project,
             notification: notification
         };
 
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
+        sessionStore.saveSession(repoName, session);
         
         this.logger.debug(`Session created: ${sessionId}`);
     }
 
     async _removeSession(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        if (fs.existsSync(sessionFile)) {
-            fs.unlinkSync(sessionFile);
+        const session = sessionStore.getSessionById(sessionId);
+        if (session && sessionStore.removeSession(session.repoName, sessionId)) {
             this.logger.debug(`Session removed: ${sessionId}`);
         }
     }

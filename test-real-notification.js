@@ -39,7 +39,7 @@ async function testRealNotification() {
         project: 'claude-code-line',
         metadata: {
             userQuestion: '準備進行真實測試',
-            claudeResponse: '已準備好接收新指令並注入到真實 Claude 會話中',
+            claudeResponse: '已準備好接收新指令並注入到真實 AI 會話中',
             tmuxSession: realSession  // 使用真實會話名稱
         }
     };
