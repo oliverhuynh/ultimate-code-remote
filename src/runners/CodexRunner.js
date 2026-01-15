@@ -17,7 +17,7 @@ class CodexRunner extends BaseRunner {
         this.fullAuto = this._parseBool(options.fullAuto ?? process.env.CODEX_FULL_AUTO);
         this.skipGitCheck = this._parseBool(options.skipGitCheck ?? process.env.CODEX_SKIP_GIT_CHECK);
         this.workdir = options.workdir || process.env.WORKDIR || path.join(__dirname, '../..');
-        this.sessionPath = options.sessionPath || path.join(__dirname, '../data/codex-session-map.json');
+        this.sessionPath = options.sessionPath || path.join(os.homedir(), '.ultimate-code-remote', 'codex-session-map.json');
     }
 
     _parseBool(value) {

@@ -180,11 +180,15 @@ function listTokens(repoName = null) {
 }
 
 function generateToken() {
+    const tokens = readJson(TOKENS_PATH, { tokens: {} }).tokens || {};
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let token = '';
-    for (let i = 0; i < 8; i++) {
-        token += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    do {
+        token = '';
+        for (let i = 0; i < 8; i++) {
+            token += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+    } while (tokens[token]);
     return token;
 }
 
@@ -263,5 +267,6 @@ module.exports = {
     updateSession,
     listTokens,
     reindexSessions,
-    createManualSession
+    createManualSession,
+    generateToken
 };

@@ -226,8 +226,45 @@ CODEX_SKIP_GIT_CHECK=false
 ```
 
 **Resume behavior**
-- The last Codex session ID is stored per chat/user under `src/data/codex-session-map.json`.
+- The last Codex session ID is stored per token under `~/.ultimate-code-remote/codex-session-map.json`.
 - Follow-up commands resume that session automatically when available.
+
+### Sync Existing Codex Sessions
+
+If you already have Codex sessions stored under `~/.codex/sessions`, you can import them to this tool so you can resume/switch sessions.
+
+```bash
+# List sessions from ~/.codex/sessions
+ultimate-code-remote codex sync list
+
+# Import a specific session by id
+ultimate-code-remote codex sync import --id <codex_session_id>
+
+# Import all sessions (dry-run)
+ultimate-code-remote codex sync import --all --dry-run
+ultimate-code-remote codex sync import --all --auto-add -y
+
+# Migrate legacy map to raw token keys
+ultimate-code-remote codex sync --migrate-map --dry-run
+ultimate-code-remote codex sync --migrate-map
+ultimate-code-remote codex sync --migrate-map --auto-add
+ultimate-code-remote codex sync --migrate-map --auto-add -y
+```
+
+Notes:
+- By default, imports are mapped to the raw token in `~/.ultimate-code-remote/codex-session-map.json`.
+- Use `--session-key` or `--bind` to bind a specific key if needed.
+- Use `--auto-add` to register missing repos (confirmation required unless `-y`).
+- Use `-y` to auto-confirm repo adds.
+
+### Migrate Legacy Codex Session Map
+
+If you previously mapped Codex sessions to `email:<sessionId>`, use `--migrate-map` on the sync script.
+Notes:
+- Migration generates raw token mappings and removes legacy keys.
+- It attempts to resolve `cwd` from `~/.codex/sessions` to register tokens in the local session store.
+- Use `--auto-add` to register repos discovered during migration.
+- Use `-y` to auto-confirm repo adds.
 
 **Security note**
 - Do **not** use `CODEX_SANDBOX=danger-full-access` unless you fully understand the risks.

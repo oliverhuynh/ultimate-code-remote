@@ -62,6 +62,7 @@ Usage:
   ultimate-code-remote sessions list [--repo <name>]
   ultimate-code-remote sessions reindex
   ultimate-code-remote sessions new --repo <name>
+  ultimate-code-remote codex sync [list|import] [--all|--id <id>] [--repo <name>] [--auto-add] [--dry-run] [--migrate-map]
 
 Storage:
   ${REPOS_PATH}
@@ -212,6 +213,12 @@ function startEmailDaemon() {
     startProcess(scriptPath, ['daemon', 'start']);
 }
 
+function startCodexSync(args) {
+    const scriptPath = path.join(__dirname, 'sync-codex-sessions.js');
+    startProcess(scriptPath, args);
+}
+
+
 function startEnabledPlatforms() {
     const config = loadConfig();
     const telegram = config.getChannel('telegram');
@@ -311,6 +318,25 @@ async function run() {
             const repoFlagIndex = args.indexOf('--repo');
             const repoName = repoFlagIndex !== -1 ? args[repoFlagIndex + 1] : null;
             sessionsNew(repoName || null);
+            return;
+        }
+        showHelp();
+        process.exit(1);
+    }
+
+    if (args[0] === 'codex') {
+        const action = args[1];
+        if (action === 'sync') {
+            process.chdir(path.join(__dirname, '..'));
+            const syncArgs = args.slice(2);
+            if (!syncArgs.length || syncArgs[0].startsWith('--')) {
+                const hasImportFlag = syncArgs.includes('--all') || syncArgs.includes('--id') || syncArgs.includes('--file');
+                if (hasImportFlag) {
+                    startCodexSync(['import', ...syncArgs]);
+                    return;
+                }
+            }
+            startCodexSync(syncArgs);
             return;
         }
         showHelp();

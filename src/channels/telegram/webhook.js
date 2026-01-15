@@ -193,7 +193,7 @@ class TelegramWebhookHandler {
 
         try {
             const tmuxSession = session.tmuxSession || 'default';
-            const sessionKey = `telegram:${chatId}`;
+            const sessionKey = token;
             const runnerContext = {
                 sessionKey,
                 sessionName: tmuxSession,

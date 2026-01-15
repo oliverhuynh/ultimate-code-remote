@@ -181,7 +181,7 @@ class LINEWebhookHandler {
 
         try {
             const tmuxSession = session.tmuxSession || 'default';
-            const sessionKey = `line:${userId}`;
+            const sessionKey = token;
             const runnerContext = {
                 sessionKey,
                 sessionName: tmuxSession,

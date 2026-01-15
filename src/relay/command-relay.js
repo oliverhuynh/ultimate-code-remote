@@ -204,7 +204,8 @@ class CommandRelayService extends EventEmitter {
                 return;
             }
 
-            const sessionKey = `email:${commandItem.sessionId}`;
+            const sessionToken = commandItem.session?.token;
+            const sessionKey = sessionToken || `email:${commandItem.sessionId}`;
             const runnerContext = {
                 sessionKey,
                 sendCommand: async (command) => {

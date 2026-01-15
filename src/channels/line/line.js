@@ -44,13 +44,7 @@ class LINEChannel extends NotificationChannel {
     }
 
     _generateToken() {
-        // Generate short Token (uppercase letters + numbers, 8 digits)
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let token = '';
-        for (let i = 0; i < 8; i++) {
-            token += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return token;
+        return sessionStore.generateToken();
     }
 
     _getCurrentTmuxSession() {
