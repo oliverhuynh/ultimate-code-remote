@@ -9,6 +9,10 @@ const CodexRunner = require('../src/runners/CodexRunner');
 
 function mockSpawnFactory(expectations = {}) {
     return (bin, args, options) => {
+        if (expectations.cwd && options.cwd !== expectations.cwd) {
+            throw new Error(`Unexpected cwd: ${options.cwd}`);
+        }
+
         const child = new EventEmitter();
         child.stdout = new PassThrough();
         child.stderr = new PassThrough();
@@ -53,6 +57,7 @@ function mockSpawnFactory(expectations = {}) {
 
 async function run() {
     const sessionPath = path.join(os.tmpdir(), `codex-session-${Date.now()}.json`);
+    const altWorkdir = path.join(os.tmpdir(), `codex-workdir-${Date.now()}`);
     const runner = new CodexRunner({
         bin: 'codex',
         sandbox: 'read-only',
@@ -62,12 +67,13 @@ async function run() {
         sessionPath,
         spawnImpl: mockSpawnFactory({
             bin: 'codex',
-            containsArgs: ['--json', '--sandbox', 'read-only', '--full-auto', '--skip-git-repo-check']
+            containsArgs: ['--json', '--sandbox', 'read-only', '--full-auto', '--skip-git-repo-check'],
+            cwd: altWorkdir
         })
     });
 
     const sessionKey = 'test:user-1';
-    const first = await runner.run('Hello from test', { sessionKey });
+    const first = await runner.run('Hello from test', { sessionKey, workdir: altWorkdir });
     if (!first.finalText.includes('Mock response')) {
         throw new Error('Final text not captured from output file');
     }

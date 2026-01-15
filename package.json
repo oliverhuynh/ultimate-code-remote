@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Claude Code Smart Notification System - Send desktop notifications when Claude completes tasks or needs input",
   "main": "hook-notify.js",
+  "bin": {
+    "claude-remote": "claude-remote.js",
+    "ultimate-code-remote": "scripts/ultimate-code-remote.js"
+  },
   "scripts": {
     "setup": "node setup.js",
     "config": "node claude-remote-config.js",
@@ -13,7 +17,8 @@
     "relay:start": "INJECTION_MODE=pty node src/relay/relay-pty.js",
     "telegram": "node start-telegram-webhook.js",
     "line": "node start-line-webhook.js",
-    "webhooks": "node start-all-webhooks.js"
+    "webhooks": "node start-all-webhooks.js",
+    "start:ngrok": "node scripts/start-with-ngrok.js"
   },
   "keywords": [
     "claude-code",

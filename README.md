@@ -175,6 +175,99 @@ CODEX_SKIP_GIT_CHECK=false
 **Security note**
 - Do **not** use `CODEX_SANDBOX=danger-full-access` unless you fully understand the risks.
 
+### Multi-Repo (All Channels, Single Bot/Webhook)
+
+If you want one bot handling multiple repos (Telegram/LINE/email), sessions are stored per repo under `~/.ultimate-code-remote/<repo-name>/sessions`, and token lookup is indexed globally.
+
+**Steps**
+1. Register repos (required, no default; unregistered repos will error):
+   ```bash
+   ultimate-code-remote repo add my-repo /path/to/repo
+   ```
+
+2. Start the webhook (one process only):
+   ```bash
+   ultimate-code-remote
+   ```
+
+3. In each repo where you send notifications, set:
+   ```env
+   WORKDIR=/path/to/that/repo
+   ```
+
+4. Tokens will route to the correct repo via `~/.ultimate-code-remote/tokens.json`.
+
+**Storage layout**
+- `~/.ultimate-code-remote/repos.json` → repoName → workdir
+- `~/.ultimate-code-remote/tokens.json` → token → repoName + sessionId
+- `~/.ultimate-code-remote/sessions.json` → sessionId → repoName
+- `~/.ultimate-code-remote/<repo-name>/sessions/*.json` → full session payloads
+
+### Repo Manager (ultimate-code-remote)
+
+Use the built-in repo manager to keep a list of repos you control:
+
+```bash
+ultimate-code-remote repo list
+ultimate-code-remote repo add my-repo /path/to/repo
+ultimate-code-remote repo init
+ultimate-code-remote repo remove my-repo
+ultimate-code-remote sessions list
+ultimate-code-remote sessions list --repo my-repo
+ultimate-code-remote sessions reindex
+ultimate-code-remote sessions new --repo my-repo
+```
+
+Repo data is stored under `~/.ultimate-code-remote/repos.json`.
+
+### ultimate-code-remote Commands
+
+Start ngrok + all enabled platforms (Telegram/LINE/email relay):
+```bash
+ultimate-code-remote
+```
+
+Dry-run to see what would start:
+```bash
+ultimate-code-remote --dry-run
+```
+
+Start a specific platform:
+```bash
+ultimate-code-remote telegram
+ultimate-code-remote line
+ultimate-code-remote email
+ultimate-code-remote webhooks
+ultimate-code-remote ngrok
+```
+
+### One-Command Ngrok Launcher
+
+This will start ngrok on your webhook port, update `.env` with the public URL, then start all enabled services:
+
+```bash
+ultimate-code-remote ngrok
+```
+
+Config:
+```env
+TELEGRAM_WEBHOOK_PORT=3001
+NGROK_BIN=ngrok
+```
+
+### Telegram Bot Admin Commands
+
+You can run repo/session listing commands directly in Telegram:
+
+```
+/repo list
+/repo work-on --repo my-repo
+/sessions list
+/sessions list --repo my-repo
+/sessions new --repo my-repo
+/work-on <TOKEN>
+```
+
 **Manual Setup:**
 1. Create bot via [@BotFather](https://t.me/BotFather)
 2. Get your Chat ID from bot API

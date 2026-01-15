@@ -9,6 +9,7 @@ const EventEmitter = require('events');
 const Logger = require('../core/logger');
 const fs = require('fs');
 const path = require('path');
+const sessionStore = require('../utils/session-store');
 
 class EmailListener extends EventEmitter {
     constructor(config) {
@@ -18,7 +19,7 @@ class EmailListener extends EventEmitter {
         this.imap = null;
         this.isConnected = false;
         this.isListening = false;
-        this.sessionsDir = path.join(__dirname, '../data/sessions');
+        this.sessionsDir = sessionStore.ROOT_DIR;
         this.sentMessagesPath = config.sentMessagesPath || path.join(__dirname, '../data/sent-messages.json');
         this.checkInterval = (config.template?.checkInterval || 30) * 1000; // Convert to milliseconds
         this.lastCheckTime = new Date();
@@ -330,33 +331,21 @@ class EmailListener extends EventEmitter {
     }
 
     _getSessionIdByToken(token) {
-        // Check session files for matching token
         try {
-            const sessionFiles = fs.readdirSync(this.sessionsDir);
-            for (const file of sessionFiles) {
-                if (file.endsWith('.json')) {
-                    const sessionPath = path.join(this.sessionsDir, file);
-                    const sessionData = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-                    if (sessionData.token === token) {
-                        return sessionData.id;
-                    }
-                }
-            }
+            const session = sessionStore.findSessionByToken(token);
+            return session ? session.id : null;
         } catch (error) {
             this.logger.error('Error looking up session by token:', error.message);
+            return null;
         }
-        return null;
     }
 
     async _validateSession(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        
-        if (!fs.existsSync(sessionFile)) {
-            return null;
-        }
-
         try {
-            const sessionData = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+            const sessionData = sessionStore.getSessionById(sessionId);
+            if (!sessionData) {
+                return null;
+            }
             
             // Check if session has expired
             const now = new Date();
@@ -365,7 +354,7 @@ class EmailListener extends EventEmitter {
             if (now > expires) {
                 this.logger.debug(`Session ${sessionId} has expired`);
                 // Delete expired session
-                fs.unlinkSync(sessionFile);
+                sessionStore.removeSession(sessionData.repoName, sessionId);
                 return null;
             }
 
@@ -453,19 +442,17 @@ class EmailListener extends EventEmitter {
     }
 
     async updateSessionCommandCount(sessionId) {
-        const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
-        
-        if (fs.existsSync(sessionFile)) {
-            try {
-                const sessionData = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-                sessionData.commandCount = (sessionData.commandCount || 0) + 1;
-                sessionData.lastCommand = new Date().toISOString();
-                
-                fs.writeFileSync(sessionFile, JSON.stringify(sessionData, null, 2));
-                this.logger.debug(`Updated command count for session ${sessionId}: ${sessionData.commandCount}`);
-            } catch (error) {
-                this.logger.error(`Error updating session ${sessionId}:`, error.message);
-            }
+        try {
+            const sessionData = sessionStore.getSessionById(sessionId);
+            if (!sessionData) return;
+
+            sessionData.commandCount = (sessionData.commandCount || 0) + 1;
+            sessionData.lastCommand = new Date().toISOString();
+
+            sessionStore.updateSession(sessionData.repoName, sessionData);
+            this.logger.debug(`Updated command count for session ${sessionId}: ${sessionData.commandCount}`);
+        } catch (error) {
+            this.logger.error(`Error updating session ${sessionId}:`, error.message);
         }
     }
 

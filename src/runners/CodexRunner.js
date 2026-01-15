@@ -62,7 +62,8 @@ class CodexRunner extends BaseRunner {
         const outputFile = this._createOutputFilePath();
         const args = this._buildArgs({ mode, sessionId, prompt, outputFile });
 
-        const result = await this._spawnCodex(args, outputFile);
+        const workdir = context.workdir || this.workdir;
+        const result = await this._spawnCodex(args, outputFile, workdir);
 
         if (result.sessionId) {
             await this._setSessionId(sessionKey, result.sessionId);
@@ -104,14 +105,14 @@ class CodexRunner extends BaseRunner {
         return path.join(os.tmpdir(), filename);
     }
 
-    _spawnCodex(args, outputFile) {
+    _spawnCodex(args, outputFile, workdir) {
         return new Promise((resolve, reject) => {
             let stdout = '';
             let stderr = '';
             let sessionId = null;
 
             const child = this.spawnImpl(this.bin, args, {
-                cwd: this.workdir,
+                cwd: workdir,
                 stdio: ['ignore', 'pipe', 'pipe']
             });
 

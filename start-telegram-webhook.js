@@ -56,7 +56,22 @@ async function start() {
         try {
             const webhookEndpoint = `${config.webhookUrl}/webhook/telegram`;
             logger.info(`Setting webhook to: ${webhookEndpoint}`);
-            await webhookHandler.setWebhook(webhookEndpoint);
+            let attempts = 0;
+            while (attempts < 3) {
+                try {
+                    await webhookHandler.setWebhook(webhookEndpoint);
+                    break;
+                } catch (error) {
+                    attempts += 1;
+                    const retryAfter = error?.response?.data?.parameters?.retry_after;
+                    if (error?.response?.data?.error_code === 429 && retryAfter) {
+                        logger.warn(`Telegram rate limit, retrying after ${retryAfter}s...`);
+                        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                        continue;
+                    }
+                    throw error;
+                }
+            }
         } catch (error) {
             logger.error('Failed to set webhook:', error.message);
             logger.info('You can manually set the webhook using:');
