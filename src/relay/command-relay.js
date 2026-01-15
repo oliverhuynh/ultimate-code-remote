@@ -13,6 +13,8 @@ const Logger = require('../core/logger');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { createRunner } = require('../runners');
+const EmailChannel = require('../channels/email/smtp');
 
 class CommandRelayService extends EventEmitter {
     constructor(config) {
@@ -28,6 +30,8 @@ class CommandRelayService extends EventEmitter {
         this.commandQueue = [];
         this.processingQueue = false;
         this.stateFile = path.join(__dirname, '../data/relay-state.json');
+        this.runner = createRunner();
+        this.emailChannel = null;
         
         this._ensureDirectories();
         this._loadState();
@@ -190,32 +194,44 @@ class CommandRelayService extends EventEmitter {
         commandItem.executedAt = new Date().toISOString();
 
         try {
-            // Check if Claude Code process is running
-            const claudeProcess = await this._findClaudeCodeProcess();
-            
-            if (!claudeProcess || !claudeProcess.available) {
-                throw new Error('Claude Code not available');
+            const sessionKey = `email:${commandItem.sessionId}`;
+            const runnerContext = {
+                sessionKey,
+                sendCommand: async (command) => {
+                    const claudeProcess = await this._findClaudeCodeProcess();
+                    if (!claudeProcess || !claudeProcess.available) {
+                        throw new Error('Claude Code not available');
+                    }
+                    return this._sendCommandToClaudeCode(command, claudeProcess, commandItem.sessionId);
+                }
+            };
+
+            let result;
+            if (this.runner.supportsResume && await this.runner.hasSession(sessionKey)) {
+                result = await this.runner.resume(commandItem.command, runnerContext);
+            } else {
+                result = await this.runner.run(commandItem.command, runnerContext);
             }
 
-            // Execute command - try multiple methods
-            const success = await this._sendCommandToClaudeCode(commandItem.command, claudeProcess, commandItem.sessionId);
-            
-            if (success) {
-                commandItem.status = 'completed';
-                commandItem.completedAt = new Date().toISOString();
-                
-                // Update session command count
-                if (this.emailListener) {
-                    await this.emailListener.updateSessionCommandCount(commandItem.sessionId);
-                }
-                
-                this.logger.info(`Command ${commandItem.id} executed successfully`);
-                this.emit('commandExecuted', commandItem);
-            } else {
-                throw new Error('Failed to send command to Claude Code');
+            if (result && result.finalText) {
+                await this._sendRunnerResponse(commandItem, result.finalText);
             }
+
+            commandItem.status = 'completed';
+            commandItem.completedAt = new Date().toISOString();
+            
+            // Update session command count
+            if (this.emailListener) {
+                await this.emailListener.updateSessionCommandCount(commandItem.sessionId);
+            }
+            
+            this.logger.info(`Command ${commandItem.id} executed successfully`);
+            this.emit('commandExecuted', commandItem);
 
         } catch (error) {
+            if (this.runner.name === 'codex') {
+                await this._sendRunnerError(commandItem, error.message);
+            }
             commandItem.status = 'failed';
             commandItem.error = error.message;
             commandItem.failedAt = new Date().toISOString();
@@ -453,6 +469,55 @@ class CommandRelayService extends EventEmitter {
                 resolve(false);
             }
         });
+    }
+
+    async _sendRunnerResponse(commandItem, finalText) {
+        if (this.runner.name !== 'codex') {
+            return;
+        }
+
+        try {
+            const channel = this._getEmailChannel();
+            const notification = this._buildRunnerNotification(commandItem, finalText, 'completed');
+            await channel.send(notification);
+        } catch (error) {
+            this.logger.error('Failed to send Codex email response:', error.message);
+        }
+    }
+
+    async _sendRunnerError(commandItem, errorMessage) {
+        if (this.runner.name !== 'codex') {
+            return;
+        }
+
+        try {
+            const channel = this._getEmailChannel();
+            const notification = this._buildRunnerNotification(commandItem, errorMessage, 'completed');
+            await channel.send(notification);
+        } catch (error) {
+            this.logger.error('Failed to send Codex error email:', error.message);
+        }
+    }
+
+    _buildRunnerNotification(commandItem, responseText, type) {
+        const project = path.basename(process.cwd());
+        return {
+            type,
+            title: 'Claude Code - Task Completed',
+            message: `[${project}] Task completed, Claude is waiting for next instruction`,
+            project,
+            metadata: {
+                userQuestion: commandItem.command,
+                claudeResponse: responseText
+            }
+        };
+    }
+
+    _getEmailChannel() {
+        if (!this.emailChannel) {
+            this.emailChannel = new EmailChannel(this.config);
+        }
+        return this.emailChannel;
     }
 
     _handleCommandError(commandItem, error) {

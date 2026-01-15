@@ -177,7 +177,7 @@ class TelegramChannel extends NotificationChannel {
         const emoji = type === 'completed' ? '✅' : '⏳';
         const status = type === 'completed' ? 'Completed' : 'Waiting for Input';
         
-        let messageText = `${emoji} *Claude Task ${status}*\n`;
+        let messageText = `${emoji} *AI Task ${status}*\n`;
         messageText += `*Project:* ${notification.project}\n`;
         messageText += `*Session Token:* \`${token}\`\n\n`;
         

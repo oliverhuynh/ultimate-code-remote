@@ -34,7 +34,7 @@ async function testRealNotification() {
     // Create REAL notification
     const notification = {
         type: 'completed',
-        title: 'Claude Task Completed',
+        title: 'AI Task Completed',
         message: 'Real notification - Ready for command injection',
         project: 'claude-code-line',
         metadata: {

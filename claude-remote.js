@@ -82,6 +82,9 @@ class ClaudeCodeRemoteCLI {
                 case 'diagnose':
                     await this.handleDiagnose(args.slice(1));
                     break;
+                case 'codex-sessions':
+                    await this.handleCodexSessions(args.slice(1));
+                    break;
                 case '--help':
                 case '-h':
                 case undefined:
@@ -971,6 +974,20 @@ class ClaudeCodeRemoteCLI {
         await diagnostic.runDiagnostic();
     }
 
+    async handleCodexSessions(args) {
+        const CodexRunner = require('./src/runners/CodexRunner');
+        const action = args[0];
+
+        if (action !== 'clear') {
+            console.log('Usage: claude-remote codex-sessions clear');
+            return;
+        }
+
+        const runner = new CodexRunner();
+        await runner.clearSessions();
+        console.log('✅ Codex session map cleared');
+    }
+
     showHelp() {
         console.log(`
 Claude-Code-Remote - Claude Code Smart Notification System
@@ -993,6 +1010,7 @@ Commands:
   test-claude [command]   Test Claude Code full automation
   setup-permissions       Setup macOS permissions for automation
   diagnose                Diagnose automation issues
+  codex-sessions <action> Manage Codex session mappings
   
 Options:
   -h, --help             Show this help message
@@ -1015,6 +1033,9 @@ Commands Subcommands:
   commands cleanup       Clean up old command files
   commands clear         Clear all pending commands
 
+Codex Sessions Subcommands:
+  codex-sessions clear   Clear Codex session mappings
+
 Examples:
   claude-remote notify --type completed
   claude-remote test
@@ -1027,6 +1048,7 @@ Examples:
   claude-remote test-claude               # Test full automation (recommended)
   claude-remote commands list             # View pending email commands
   claude-remote relay start               # Run in foreground (need to keep window open)
+  claude-remote codex-sessions clear       # Clear Codex session mappings
 
 For more information, visit: https://github.com/Claude-Code-Remote/Claude-Code-Remote
         `);

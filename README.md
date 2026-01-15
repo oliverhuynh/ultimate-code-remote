@@ -138,6 +138,43 @@ chmod +x setup-telegram.sh
 ./setup-telegram.sh
 ```
 
+### Using Codex (Optional Runner)
+
+To run tasks with the OpenAI Codex CLI instead of Claude Code, install and authenticate `codex` locally, then set the runner env vars below.
+
+**Prerequisites**
+- `codex` CLI installed and authenticated on the machine running this repo.
+
+**Read-only sandbox example**
+```env
+RUNNER=codex
+CODEX_BIN=codex
+CODEX_SANDBOX=read-only
+WORKDIR=/path/to/Claude-Code-Remote
+```
+
+**Workspace-write sandbox example**
+```env
+RUNNER=codex
+CODEX_BIN=codex
+CODEX_SANDBOX=workspace-write
+WORKDIR=/path/to/Claude-Code-Remote
+```
+
+**Optional flags**
+```env
+CODEX_ARGS=--some-extra-flag
+CODEX_FULL_AUTO=false
+CODEX_SKIP_GIT_CHECK=false
+```
+
+**Resume behavior**
+- The last Codex session ID is stored per chat/user under `src/data/codex-session-map.json`.
+- Follow-up commands resume that session automatically when available.
+
+**Security note**
+- Do **not** use `CODEX_SANDBOX=danger-full-access` unless you fully understand the risks.
+
 **Manual Setup:**
 1. Create bot via [@BotFather](https://t.me/BotFather)
 2. Get your Chat ID from bot API

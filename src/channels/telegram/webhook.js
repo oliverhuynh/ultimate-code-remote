@@ -10,6 +10,8 @@ const path = require('path');
 const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
+const { createRunner } = require('../../runners');
+const { formatTelegramResponse } = require('../../utils/formatting');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -17,6 +19,7 @@ class TelegramWebhookHandler {
         this.logger = new Logger('TelegramWebhook');
         this.sessionsDir = path.join(__dirname, '../../data/sessions');
         this.injector = new ControllerInjector();
+        this.runner = createRunner();
         this.app = express();
         this.apiBaseUrl = 'https://api.telegram.org';
         this.botUsername = null; // Cache for bot username
@@ -137,17 +140,36 @@ class TelegramWebhookHandler {
         }
 
         try {
-            // Inject command into tmux session
             const tmuxSession = session.tmuxSession || 'default';
-            await this.injector.injectCommand(command, tmuxSession);
-            
-            // Send confirmation
-            await this._sendMessage(chatId, 
-                `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nClaude is now processing your request...`,
-                { parse_mode: 'Markdown' });
-            
-            // Log command execution
-            this.logger.info(`Command injected - User: ${chatId}, Token: ${token}, Command: ${command}`);
+            const sessionKey = `telegram:${chatId}`;
+            const runnerContext = {
+                sessionKey,
+                sessionName: tmuxSession,
+                injector: this.injector
+            };
+
+            let result;
+            if (this.runner.supportsResume && await this.runner.hasSession(sessionKey)) {
+                result = await this.runner.resume(command, runnerContext);
+            } else {
+                result = await this.runner.run(command, runnerContext);
+            }
+
+            if (result && result.finalText) {
+                const formatted = formatTelegramResponse(this.runner.name, command, result.finalText, 3500);
+                const responseText = `✅ *Task Completed*\n\n📝 *Command:* ${formatted.commandText}\n\n🤖 *Claude Response:*\n${formatted.responseBody}`;
+                const parseMode = formatted.parseMode || 'Markdown';
+                const text = parseMode === 'HTML'
+                    ? responseText.replace(/\*/g, '')
+                    : responseText;
+                await this._sendMessage(chatId, text, { parse_mode: parseMode });
+            } else {
+                await this._sendMessage(chatId, 
+                    `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nClaude is now processing your request...`,
+                    { parse_mode: 'Markdown' });
+            }
+
+            this.logger.info(`Command handled - User: ${chatId}, Token: ${token}, Runner: ${this.runner.name}`);
             
         } catch (error) {
             this.logger.error('Command injection failed:', error.message);

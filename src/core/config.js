@@ -248,6 +248,9 @@ class ConfigManager {
         for (const key in source) {
             if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
                 result[key] = this._deepMerge(result[key] || {}, source[key]);
+            } else if (source[key] === '' && result[key]) {
+                // Preserve existing non-empty value when source is empty string
+                continue;
             } else {
                 result[key] = source[key];
             }

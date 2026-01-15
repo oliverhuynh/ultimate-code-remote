@@ -10,6 +10,8 @@ const path = require('path');
 const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
+const { createRunner } = require('../../runners');
+const { formatLineResponse } = require('../../utils/formatting');
 
 class LINEWebhookHandler {
     constructor(config = {}) {
@@ -17,6 +19,7 @@ class LINEWebhookHandler {
         this.logger = new Logger('LINEWebhook');
         this.sessionsDir = path.join(__dirname, '../../data/sessions');
         this.injector = new ControllerInjector();
+        this.runner = createRunner();
         this.app = express();
         
         this._setupMiddleware();
@@ -121,16 +124,31 @@ class LINEWebhookHandler {
         }
 
         try {
-            // Inject command into tmux session
             const tmuxSession = session.tmuxSession || 'default';
-            await this.injector.injectCommand(command, tmuxSession);
-            
-            // Send confirmation
-            await this._replyMessage(replyToken, 
-                `✅ 指令已發送\n\n📝 指令: ${command}\n🖥️ 會話: ${tmuxSession}\n\n請稍候，Claude 正在處理您的請求...`);
-            
-            // Log command execution
-            this.logger.info(`Command injected - User: ${userId}, Token: ${token}, Command: ${command}`);
+            const sessionKey = `line:${userId}`;
+            const runnerContext = {
+                sessionKey,
+                sessionName: tmuxSession,
+                injector: this.injector
+            };
+
+            let result;
+            if (this.runner.supportsResume && await this.runner.hasSession(sessionKey)) {
+                result = await this.runner.resume(command, runnerContext);
+            } else {
+                result = await this.runner.run(command, runnerContext);
+            }
+
+            if (result && result.finalText) {
+                const responseBody = formatLineResponse(this.runner.name, result.finalText, 1500);
+                const responseText = `✅ 任務完成\n\n📝 指令: ${command}\n\n🤖 Claude 回應:\n${responseBody}`;
+                await this._replyMessage(replyToken, responseText);
+            } else {
+                await this._replyMessage(replyToken, 
+                    `✅ 指令已發送\n\n📝 指令: ${command}\n🖥️ 會話: ${tmuxSession}\n\n請稍候，Claude 正在處理您的請求...`);
+            }
+
+            this.logger.info(`Command handled - User: ${userId}, Token: ${token}, Runner: ${this.runner.name}`);
             
         } catch (error) {
             this.logger.error('Command injection failed:', error.message);

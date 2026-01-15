@@ -31,7 +31,7 @@ async function testNotification() {
     // Create test notification
     const notification = {
         type: 'completed',
-        title: 'Claude Task Completed',
+        title: 'AI Task Completed',
         message: 'Test notification from Claude Code Remote',
         project: 'claude-code-line',
         metadata: {
