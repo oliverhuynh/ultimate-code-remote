@@ -43,6 +43,19 @@ This project is based on and inspired by [Claude-Code-Remote](https://github.com
 
 ## 📅 Changelog
 
+### January 2026
+- **2026-01-15**: Add Codex runner with resume support and safety notes
+- **2026-01-15**: Multi-repo routing with global token/session indexes and admin commands
+- **2026-01-15**: Multi-webhook CLI with validation and launcher help
+- **2026-01-15**: Repo manager commands (list/add/remove/init) with storage under `~/.ultimate-code-remote`
+- **2026-01-15**: `ultimate-code-remote` CLI with platform subcommands and `--dry-run`
+- **2026-01-15**: One-command ngrok launcher for webhook setup
+- **2026-01-15**: Make notification/help copy model-agnostic (AI wording)
+- **2026-01-15**: Tokens no longer expire and expiration copy removed
+- **2026-01-15**: Current token support added for LINE and email; working token hides reply headers
+- **2026-01-15**: Simplified reply format for Telegram/LINE
+- **2026-01-15**: Long replies are split into multiple messages instead of truncated
+
 ### August 2025
 - **2025-08-02**: Add full execution trace to email notifications ([#14](https://github.com/JessyTsui/Claude-Code-Remote/pull/14) by [@vaclisinc](https://github.com/vaclisinc))
 - **2025-08-01**: Enhanced Multi-Channel Notification System ([#1](https://github.com/JessyTsui/Claude-Code-Remote/pull/1) by [@laihenyi](https://github.com/laihenyi) [@JessyTsui](https://github.com/JessyTsui))
