@@ -10,6 +10,7 @@ const TOKENS_PATH = path.join(ROOT_DIR, 'tokens.json');
 const SESSIONS_INDEX_PATH = path.join(ROOT_DIR, 'sessions.json');
 const CONVERSATIONS_PATH = path.join(__dirname, '../data/conversations.json');
 const { getCodexConversation } = require('./codex-conversation');
+const { formatConversation } = require('./sessions-list-format');
 
 function ensureDir(dir) {
     if (!fs.existsSync(dir)) {
@@ -106,6 +107,13 @@ function getSessionMessages(session, conversations) {
     }
 
     return { initialMessage: initialMessage || '', lastMessage: lastMessage || '' };
+}
+
+function getSessionSummary(session) {
+    if (!session) return '(no conversation recorded)';
+    const conversations = loadConversations();
+    const { initialMessage, lastMessage } = getSessionMessages(session, conversations);
+    return formatConversation(initialMessage, lastMessage);
 }
 
 function appeaseMessageFallback(session, codexConversation) {
@@ -416,6 +424,7 @@ module.exports = {
     updateSession,
     listTokens,
     listSessions,
+    getSessionSummary,
     reindexSessions,
     createManualSession,
     generateToken

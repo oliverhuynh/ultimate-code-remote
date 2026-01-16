@@ -18,6 +18,7 @@ const { isCommandSafe } = require('../../utils/command-safety');
 const RateLimiter = require('../../utils/rate-limiter');
 const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
 const { formatSessionsList } = require('../../utils/sessions-list-format');
+const { extractSlashCommand } = require('../../utils/slash-command');
 
 class LINEWebhookHandler {
     constructor(config = {}) {
@@ -97,8 +98,16 @@ class LINEWebhookHandler {
     async _handleTextMessage(event) {
         const userId = event.source.userId;
         const groupId = event.source.groupId;
-        const messageText = event.message.text.trim();
+        let messageText = event.message.text.trim();
         const replyToken = event.replyToken;
+
+        const slash = extractSlashCommand(messageText);
+        if (slash.command) {
+            if (slash.ignored) {
+                await this._replyMessage(replyToken, 'ℹ️ Found a slash command and ignored other text in your message.');
+            }
+            messageText = slash.command;
+        }
         
         if (!this._checkRateLimit(userId, groupId)) {
             await this._replyMessage(replyToken, '⏳ Rate limit exceeded. Please try again later.');
@@ -391,7 +400,9 @@ class LINEWebhookHandler {
             }
             const result = sessionStore.createManualSession(repoName);
             currentTokenStore.setToken(this._getChatKey(userId, groupId), result.token);
-            await this._replyMessage(replyToken, `✅ Working token set: ${result.token}`);
+            const session = await this._findSessionByToken(result.token);
+            const summary = sessionStore.getSessionSummary(session);
+            await this._replyMessage(replyToken, `✅ Working token set: ${result.token}\nSummary: ${summary}`);
         } catch (error) {
             await this._replyMessage(replyToken, `❌ 無法建立 token: ${error.message}`);
         }
@@ -408,7 +419,8 @@ class LINEWebhookHandler {
             return;
         }
         currentTokenStore.setToken(this._getChatKey(userId), token);
-        await this._replyMessage(replyToken, `✅ Working token set: ${token}`);
+        const summary = sessionStore.getSessionSummary(session);
+        await this._replyMessage(replyToken, `✅ Working token set: ${token}\nSummary: ${summary}`);
     }
 
     _getChatKey(userId, groupId) {

@@ -18,6 +18,7 @@ const { isCommandSafe } = require('../../utils/command-safety');
 const RateLimiter = require('../../utils/rate-limiter');
 const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
 const { formatSessionsList } = require('../../utils/sessions-list-format');
+const { extractSlashCommand } = require('../../utils/slash-command');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -91,9 +92,16 @@ class TelegramWebhookHandler {
     async _handleMessage(message) {
         const chatId = message.chat.id;
         const userId = message.from.id;
-        const messageText = message.text?.trim();
+        let messageText = message.text?.trim();
         
         if (!messageText) return;
+        const slash = extractSlashCommand(messageText);
+        if (slash.command) {
+            if (slash.ignored) {
+                await this._sendMessage(chatId, 'ℹ️ Found a slash command and ignored other text in your message.');
+            }
+            messageText = slash.command;
+        }
 
         if (!this._checkRateLimit(chatId, userId)) {
             await this._sendMessage(chatId, '⏳ Rate limit exceeded. Please try again later.');
@@ -379,7 +387,9 @@ class TelegramWebhookHandler {
             }
             const result = sessionStore.createManualSession(repoName);
             currentTokenStore.setToken(this._getChatKey(chatId), result.token);
-            await this._sendMessage(chatId, `✅ Working token set: ${result.token}`);
+            const session = await this._findSessionByToken(result.token);
+            const summary = sessionStore.getSessionSummary(session);
+            await this._sendMessage(chatId, `✅ Working token set: ${result.token}\nSummary: ${summary}`);
         } catch (error) {
             await this._sendMessage(chatId, `❌ Failed to set work token: ${error.message}`);
         }
@@ -396,7 +406,8 @@ class TelegramWebhookHandler {
             return;
         }
         currentTokenStore.setToken(this._getChatKey(chatId), token);
-        await this._sendMessage(chatId, `✅ Working token set: ${token}`);
+        const summary = sessionStore.getSessionSummary(session);
+        await this._sendMessage(chatId, `✅ Working token set: ${token}\nSummary: ${summary}`);
     }
 
     _isAuthorized(userId, chatId) {

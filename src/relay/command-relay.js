@@ -491,6 +491,9 @@ class CommandRelayService extends EventEmitter {
 
         try {
             const channel = this._getEmailChannel();
+            if (commandItem.notice) {
+                finalText = `${commandItem.notice}\n\n${finalText}`;
+            }
             const notification = this._buildRunnerNotification(commandItem, finalText, 'completed');
             await channel.send(notification);
         } catch (error) {

@@ -5,6 +5,8 @@
 - Sessions list pulls Codex conversation summaries from `~/.codex/sessions` and filters instruction/environment blocks.
 - Updated time for Codex sessions now uses the Codex session file timestamp.
 - Telegram send errors include full detail and support configurable timeout via `TELEGRAM_TIMEOUT_MS`.
+- Slash commands are now prioritized in messages across channels (Telegram/LINE/email), with notices when extra content is ignored.
+- Work-on replies now include a short conversation summary for context.
 
 ## 2026-01-15
 - **2026-01-15**: Add Codex runner with resume support and safety notes.

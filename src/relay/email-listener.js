@@ -275,7 +275,8 @@ class EmailListener extends EventEmitter {
             }
 
             // Extract command
-            const command = this._extractCommand(email);
+            const extracted = this._extractCommand(email);
+            const command = extracted?.command;
             if (!command) {
                 this.logger.warn(`No command found in email ${seqno}`);
                 return;
@@ -291,6 +292,7 @@ class EmailListener extends EventEmitter {
             this.emit('command', {
                 sessionId,
                 command: command.trim(),
+                notice: extracted?.notice || null,
                 email: {
                     from: email.from?.text,
                     subject: email.subject,
@@ -407,8 +409,20 @@ class EmailListener extends EventEmitter {
         
         // Remove empty lines and excess whitespace
         text = text.replace(/\n\s*\n/g, '\n').trim();
-        
-        return text;
+        if (!text) return { command: '', notice: null };
+
+        const { extractSlashCommand } = require('../utils/slash-command');
+        const slash = extractSlashCommand(text);
+        if (slash.command) {
+            return {
+                command: slash.command,
+                notice: slash.ignored
+                    ? 'I found other messages in your reply also, I have prioritized the slash and ignore other message.'
+                    : null
+            };
+        }
+
+        return { command: text, notice: null };
     }
 
     _cleanEmailContent(text) {
