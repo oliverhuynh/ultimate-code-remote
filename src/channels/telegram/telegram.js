@@ -154,12 +154,22 @@ class TelegramChannel extends NotificationChannel {
         };
 
         try {
-            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`);
-            const response = await axios.post(
-                `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
-                requestData,
-                this._getNetworkOptions()
-            );
+            const maxLength = parseInt(process.env.TELEGRAM_MAX_LENGTH) || 3500;
+            const chunks = messageText.length > maxLength
+                ? messageText.match(new RegExp(`.{1,${maxLength}}`, 'gs'))
+                : [messageText];
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                const payload = i === 0
+                    ? { ...requestData, text: chunk }
+                    : { chat_id: chatId, text: chunk, parse_mode: 'Markdown' };
+                enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`);
+                await axios.post(
+                    `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
+                    payload,
+                    this._getNetworkOptions()
+                );
+            }
 
             this.logger.info(`Telegram message sent successfully, Session: ${sessionId}`);
             return true;

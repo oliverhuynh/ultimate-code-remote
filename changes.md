@@ -6,7 +6,7 @@
 - Updated time for Codex sessions now uses the Codex session file timestamp.
 - Telegram send errors include full detail and support configurable timeout via `TELEGRAM_TIMEOUT_MS`.
 
-## January 2026
+## 2026-01-15
 - **2026-01-15**: Add Codex runner with resume support and safety notes.
 - **2026-01-15**: Multi-repo routing with global token/session indexes and admin commands.
 - **2026-01-15**: Multi-webhook CLI with validation and launcher help.
