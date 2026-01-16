@@ -9,6 +9,7 @@
 - Work-on replies now include a short conversation summary for context.
 - Conversation summaries now ignore slash command lines and use user-only messages.
 - Work-on summaries now include the last assistant reply.
+- CodexRunner logs full command line when DEBUG includes `codex-verbose`.
 - Repo update command can set per-repo `codexSandbox` values.
 
 ## 2026-01-15

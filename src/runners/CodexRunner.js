@@ -112,6 +112,10 @@ class CodexRunner extends BaseRunner {
             let stderr = '';
             let sessionId = null;
 
+            if (this._isVerbose()) {
+                this.logger.info('Codex command:', [this.bin, ...args].join(' '));
+            }
+
             const child = this.spawnImpl(this.bin, args, {
                 cwd: workdir,
                 stdio: ['ignore', 'pipe', 'pipe']
@@ -175,6 +179,11 @@ class CodexRunner extends BaseRunner {
         }
 
         return found;
+    }
+
+    _isVerbose() {
+        const debug = String(process.env.DEBUG || '').toLowerCase();
+        return debug.split(',').map(part => part.trim()).includes('codex-verbose');
     }
 
     async _readOutputFile(outputFile, stdout) {

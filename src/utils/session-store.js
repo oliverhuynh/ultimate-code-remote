@@ -183,7 +183,7 @@ function saveSession(repoName, session) {
 
     const existing = tokens.tokens[session.token];
     if (existing && existing.sessionId !== session.id) {
-        throw new Error(`Token already exists: ${session.token}`);
+        throw new Error('Token already exists and is bound to a different session.');
     }
 
     const sessionsDir = getRepoSessionsDir(repoName);
@@ -410,6 +410,11 @@ function reindexSessions() {
             try {
                 const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
                 if (!session.id || !session.token) return;
+                const existingToken = tokens.tokens[session.token];
+                if (existingToken && existingToken.sessionId !== session.id) {
+                    logger.warn(`Token already exists and is bound to a different session: ${session.token}`);
+                    return;
+                }
                 tokens.tokens[session.token] = { repoName: repo.name, sessionId: session.id };
                 sessionsIndex.sessions[session.id] = { repoName: repo.name };
             } catch (error) {
