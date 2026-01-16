@@ -16,6 +16,7 @@ const path = require('path');
 const { createRunner } = require('../runners');
 const EmailChannel = require('../channels/email/smtp');
 const { redactText } = require('../utils/redact-secrets');
+const { formatSessionsList } = require('../utils/sessions-list-format');
 
 class CommandRelayService extends EventEmitter {
     constructor(config) {
@@ -534,28 +535,41 @@ class CommandRelayService extends EventEmitter {
 
     _handleAdminCommand(command) {
         const trimmed = command.trim();
-        if (trimmed === 'repo list') {
+        const normalized = trimmed.replace(/^\/+/, '');
+        if (normalized === 'repo list') {
             const repos = require('../utils/session-store').getRepos();
             if (!repos.length) return 'No repos registered.';
             return repos.map(repo => `${repo.name} -> ${repo.path}`).join('\n');
         }
 
-        const sessionsMatch = trimmed.match(/^sessions list(?:\s+--repo\s+([^\s]+))?$/i);
-        if (sessionsMatch) {
-            const repoName = sessionsMatch[1] || null;
-            const entries = require('../utils/session-store').listTokens(repoName);
+        if (normalized.startsWith('sessions list')) {
+            const tokens = normalized.split(/\s+/).slice(2);
+            let repoName = null;
+            let filter = null;
+            for (let i = 0; i < tokens.length; i++) {
+                if (tokens[i] === '--repo' && tokens[i + 1]) {
+                    repoName = tokens[i + 1];
+                    i += 1;
+                    continue;
+                }
+                if (tokens[i] === '--filter' && tokens[i + 1]) {
+                    filter = tokens.slice(i + 1).join(' ');
+                    break;
+                }
+            }
+            const entries = require('../utils/session-store').listSessions({ repoName, filter, limit: 10 });
             if (!entries.length) return 'No active sessions.';
-            return entries.map(([token, info]) => `${token} -> ${info.repoName} (${info.sessionId})`).join('\n');
+            return formatSessionsList(entries, { padToken: true });
         }
 
-        const newMatch = trimmed.match(/^sessions new\s+--repo\s+([^\s]+)$/i);
+        const newMatch = normalized.match(/^sessions new\s+--repo\s+([^\s]+)$/i);
         if (newMatch) {
             const repoName = newMatch[1];
             const result = require('../utils/session-store').createManualSession(repoName);
             return `Token created: ${result.token}`;
         }
 
-        const repoWorkOnMatch = trimmed.match(/^repo work-on\s+--repo\s+([^\s]+)$/i);
+        const repoWorkOnMatch = normalized.match(/^repo work-on\s+--repo\s+([^\s]+)$/i);
         if (repoWorkOnMatch) {
             const repoName = repoWorkOnMatch[1];
             const result = require('../utils/session-store').createManualSession(repoName);

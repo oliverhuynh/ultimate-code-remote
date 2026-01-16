@@ -6,6 +6,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 const dotenv = require('dotenv');
 const sessionStore = require('../src/utils/session-store');
+const { formatSessionsList } = require('../src/utils/sessions-list-format');
 
 const HOME_DIR = os.homedir();
 const ROOT_DIR = path.join(HOME_DIR, '.ultimate-code-remote');
@@ -59,7 +60,7 @@ Usage:
   ultimate-code-remote repo add <name> <path>
   ultimate-code-remote repo init
   ultimate-code-remote repo remove <name>
-  ultimate-code-remote sessions list [--repo <name>]
+  ultimate-code-remote sessions list [--repo <name>] [--filter <filter>] (top 10 by latest access)
   ultimate-code-remote sessions reindex
   ultimate-code-remote sessions new --repo <name>
   ultimate-code-remote codex sync [list|import] [--all|--id <id>] [--repo <name>] [--auto-add] [--dry-run] [--migrate-map]
@@ -145,23 +146,18 @@ function repoInit() {
     repoAdd(name, cwd);
 }
 
-function sessionsList(repoName = null) {
-    const tokens = readJson(sessionStore.TOKENS_PATH, { tokens: {} });
-    const entries = Object.entries(tokens.tokens || {});
+function sessionsList(repoName = null, filter = null) {
+    const entries = sessionStore.listSessions({ repoName, filter, limit: 10 });
     if (entries.length === 0) {
         console.log('No active sessions.');
         return;
     }
-    const filtered = repoName
-        ? entries.filter(([, info]) => info.repoName === repoName)
-        : entries;
-    if (filtered.length === 0) {
-        console.log('No active sessions.');
-        return;
-    }
-    filtered.forEach(([token, info]) => {
-        console.log(`${token} -> ${info.repoName} (${info.sessionId})`);
-    });
+    const showDebugColumns = String(process.env.DEBUG || '').toLowerCase() === 'yes';
+    console.log(formatSessionsList(entries, {
+        padToken: true,
+        sessionIdColumn: showDebugColumns,
+        repoColumn: showDebugColumns
+    }));
 }
 
 function sessionsNew(repoName) {
@@ -306,7 +302,9 @@ async function run() {
         if (action === 'list') {
             const repoFlagIndex = args.indexOf('--repo');
             const repoName = repoFlagIndex !== -1 ? args[repoFlagIndex + 1] : null;
-            sessionsList(repoName || null);
+            const filterFlagIndex = args.indexOf('--filter');
+            const filter = filterFlagIndex !== -1 ? args[filterFlagIndex + 1] : null;
+            sessionsList(repoName || null, filter || null);
             return;
         }
         if (action === 'reindex') {

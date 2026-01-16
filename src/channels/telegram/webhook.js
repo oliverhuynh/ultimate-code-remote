@@ -7,7 +7,6 @@ const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
 const path = require('path');
-const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
 const { createRunner } = require('../../runners');
@@ -18,6 +17,7 @@ const { redactText } = require('../../utils/redact-secrets');
 const { isCommandSafe } = require('../../utils/command-safety');
 const RateLimiter = require('../../utils/rate-limiter');
 const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
+const { formatSessionsList } = require('../../utils/sessions-list-format');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -59,6 +59,10 @@ class TelegramWebhookHandler {
         const options = {};
         if (this.config.forceIPv4) {
             options.family = 4;
+        }
+        const timeoutMs = parseInt(process.env.TELEGRAM_TIMEOUT_MS, 10);
+        if (!Number.isNaN(timeoutMs) && timeoutMs > 0) {
+            options.timeout = timeoutMs;
         }
         return options;
     }
@@ -135,9 +139,21 @@ class TelegramWebhookHandler {
         }
 
         if (messageText.startsWith('/sessions list')) {
-            const match = messageText.match(/^\/sessions list(?:\s+--repo\s+([^\s]+))?$/i);
-            const repoName = match ? match[1] : null;
-            await this._sendSessionsList(chatId, repoName);
+            const tokens = messageText.trim().split(/\s+/).slice(2);
+            let repoName = null;
+            let filter = null;
+            for (let i = 0; i < tokens.length; i++) {
+                if (tokens[i] === '--repo' && tokens[i + 1]) {
+                    repoName = tokens[i + 1];
+                    i += 1;
+                    continue;
+                }
+                if (tokens[i] === '--filter' && tokens[i + 1]) {
+                    filter = tokens.slice(i + 1).join(' ');
+                    break;
+                }
+            }
+            await this._sendSessionsList(chatId, repoName, filter);
             return;
         }
 
@@ -298,14 +314,10 @@ class TelegramWebhookHandler {
             `• \`/work-on <TOKEN>\` - Set default token for this chat\n` +
             `• \`/repo list\` - List registered repos\n` +
             `• \`/repo work-on --repo <name>\` - Create token and set it\n` +
-            `• \`/sessions list [--repo <name>]\` - List active tokens\n\n` +
+            `• \`/sessions list [--repo <name>] [--filter <filter>]\` - List top 10 sessions\n\n` +
             `• \`/sessions new --repo <name>\` - Create a new token\n\n` +
             `*Example:*\n` +
-            `\`/cmd ABC12345 analyze the performance of this function\`\n\n` +
-            `*Tips:*\n` +
-            `• Tokens are case-insensitive\n` +
-            `• Tokens do not expire\n` +
-            `• You can also just type \`TOKEN command\` without /cmd`;
+            `\`/cmd ABC12345 analyze the performance of this function\``;
         
         await this._sendMessage(chatId, message, { parse_mode: 'Markdown' });
     }
@@ -328,15 +340,19 @@ class TelegramWebhookHandler {
         }
     }
 
-    async _sendSessionsList(chatId, repoName = null) {
+    async _sendSessionsList(chatId, repoName = null, filter = null) {
         try {
-            const entries = sessionStore.listTokens(repoName);
+            const entries = sessionStore.listSessions({ repoName, filter, limit: 10 });
             if (!entries.length) {
                 await this._sendMessage(chatId, 'No active sessions.');
                 return;
             }
-            const lines = entries.map(([token, info]) => `• ${token} -> ${info.repoName} (${info.sessionId})`);
-            await this._sendMessage(chatId, `🧾 Sessions:\n${lines.join('\n')}`);
+            const output = formatSessionsList(entries, {
+                updatedLabel: 'Updated',
+                tokenLabel: 'Token',
+                conversationLabel: 'Conversation'
+            });
+            await this._sendMessage(chatId, `🧾 Sessions:\n${output}`);
         } catch (error) {
             await this._sendMessage(chatId, `❌ Failed to list sessions: ${error.message}`);
         }
@@ -479,21 +495,34 @@ class TelegramWebhookHandler {
             return;
         }
         const safeText = redactText(text);
-        try {
-            enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`);
-            await axios.post(
-                `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
-                {
-                    chat_id: chatId,
-                    text: safeText,
-                    ...options
-                },
-                this._getNetworkOptions()
-            );
-        } catch (error) {
-            const status = error.response?.status;
-            const data = error.response?.data;
-            this.logger.error('Failed to send message:', status ? { status, data } : (data || error.message));
+        const maxLength = parseInt(process.env.TELEGRAM_MAX_LENGTH) || 3500;
+        const chunks = safeText.length > maxLength
+            ? safeText.match(new RegExp(`.{1,${maxLength}}`, 'gs'))
+            : [safeText];
+        for (const chunk of chunks) {
+            try {
+                enforceAllowedUrl(`${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`);
+                await axios.post(
+                    `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
+                    {
+                        chat_id: chatId,
+                        text: chunk,
+                        ...options
+                    },
+                    this._getNetworkOptions()
+                );
+            } catch (error) {
+                const status = error.response?.status;
+                const data = error.response?.data;
+                const detail = {
+                    status,
+                    data,
+                    message: error.message,
+                    code: error.code
+                };
+                this.logger.error('Failed to send message:', detail);
+                break;
+            }
         }
     }
 

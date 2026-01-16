@@ -7,7 +7,6 @@ const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
 const path = require('path');
-const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
 const { createRunner } = require('../../runners');
@@ -18,6 +17,7 @@ const { redactText } = require('../../utils/redact-secrets');
 const { isCommandSafe } = require('../../utils/command-safety');
 const RateLimiter = require('../../utils/rate-limiter');
 const { enforceAllowedUrl } = require('../../utils/outbound-allowlist');
+const { formatSessionsList } = require('../../utils/sessions-list-format');
 
 class LINEWebhookHandler {
     constructor(config = {}) {
@@ -112,34 +112,46 @@ class LINEWebhookHandler {
             return;
         }
 
-        if (messageText === 'repo list') {
+        if (messageText === 'repo list' || messageText === '/repo list') {
             await this._sendRepoList(replyToken);
             return;
         }
 
-        if (messageText.startsWith('repo work-on')) {
-            const match = messageText.match(/^repo work-on\s+--repo\s+([^\s]+)$/i);
+        if (messageText.startsWith('repo work-on') || messageText.startsWith('/repo work-on')) {
+            const match = messageText.match(/^\/?repo work-on\s+--repo\s+([^\s]+)$/i);
             const repoName = match ? match[1] : null;
             await this._repoWorkOn(replyToken, repoName, userId, groupId);
             return;
         }
 
-        if (messageText.startsWith('sessions list')) {
-            const match = messageText.match(/^sessions list(?:\s+--repo\s+([^\s]+))?$/i);
-            const repoName = match ? match[1] : null;
-            await this._sendSessionsList(replyToken, repoName);
+        if (messageText.startsWith('sessions list') || messageText.startsWith('/sessions list')) {
+            const tokens = messageText.trim().split(/\s+/).slice(2);
+            let repoName = null;
+            let filter = null;
+            for (let i = 0; i < tokens.length; i++) {
+                if (tokens[i] === '--repo' && tokens[i + 1]) {
+                    repoName = tokens[i + 1];
+                    i += 1;
+                    continue;
+                }
+                if (tokens[i] === '--filter' && tokens[i + 1]) {
+                    filter = tokens.slice(i + 1).join(' ');
+                    break;
+                }
+            }
+            await this._sendSessionsList(replyToken, repoName, filter);
             return;
         }
 
-        if (messageText.startsWith('sessions new')) {
-            const match = messageText.match(/^sessions new\s+--repo\s+([^\s]+)$/i);
+        if (messageText.startsWith('sessions new') || messageText.startsWith('/sessions new')) {
+            const match = messageText.match(/^\/?sessions new\s+--repo\s+([^\s]+)$/i);
             const repoName = match ? match[1] : null;
             await this._sendSessionNew(replyToken, repoName);
             return;
         }
 
-        if (messageText.startsWith('work-on')) {
-            const match = messageText.match(/^work-on\s+([A-Z0-9]{8})$/i);
+        if (messageText.startsWith('work-on') || messageText.startsWith('/work-on')) {
+            const match = messageText.match(/^\/?work-on\s+([A-Z0-9]{8})$/i);
             const token = match ? match[1].toUpperCase() : null;
             await this._setWorkOn(replyToken, userId, token);
             return;
@@ -197,7 +209,8 @@ class LINEWebhookHandler {
             }
 
             if (result && result.finalText) {
-                const responseChunks = formatLineResponse(this.runner.name, result.finalText, 1500);
+                const maxLength = parseInt(process.env.LINE_MAX_LENGTH) || 1500;
+                const responseChunks = formatLineResponse(this.runner.name, result.finalText, maxLength);
                 const previewLength = 50;
                 const commandPreview = command.length > previewLength
                     ? `${command.slice(0, previewLength)}...`
@@ -339,15 +352,19 @@ class LINEWebhookHandler {
         }
     }
 
-    async _sendSessionsList(replyToken, repoName = null) {
+    async _sendSessionsList(replyToken, repoName = null, filter = null) {
         try {
-            const entries = sessionStore.listTokens(repoName);
+            const entries = sessionStore.listSessions({ repoName, filter, limit: 10 });
             if (!entries.length) {
                 await this._replyMessage(replyToken, '沒有啟用中的 sessions。');
                 return;
             }
-            const lines = entries.map(([token, info]) => `• ${token} -> ${info.repoName} (${info.sessionId})`);
-            await this._replyMessage(replyToken, `🧾 Sessions:\n${lines.join('\n')}`);
+            const output = formatSessionsList(entries, {
+                updatedLabel: 'Updated',
+                tokenLabel: 'Token',
+                conversationLabel: 'Conversation'
+            });
+            await this._replyMessage(replyToken, `🧾 Sessions:\n${output}`);
         } catch (error) {
             await this._replyMessage(replyToken, `❌ 無法列出 sessions: ${error.message}`);
         }
@@ -356,7 +373,7 @@ class LINEWebhookHandler {
     async _sendSessionNew(replyToken, repoName) {
         try {
             if (!repoName) {
-                await this._replyMessage(replyToken, 'Usage: sessions new --repo <name>');
+                await this._replyMessage(replyToken, 'Usage: /sessions new --repo <name>');
                 return;
             }
             const result = sessionStore.createManualSession(repoName);
@@ -369,7 +386,7 @@ class LINEWebhookHandler {
     async _repoWorkOn(replyToken, repoName, userId, groupId) {
         try {
             if (!repoName) {
-                await this._replyMessage(replyToken, 'Usage: repo work-on --repo <name>');
+                await this._replyMessage(replyToken, 'Usage: /repo work-on --repo <name>');
                 return;
             }
             const result = sessionStore.createManualSession(repoName);
@@ -382,7 +399,7 @@ class LINEWebhookHandler {
 
     async _setWorkOn(replyToken, userId, token) {
         if (!token) {
-            await this._replyMessage(replyToken, 'Usage: work-on <TOKEN>');
+            await this._replyMessage(replyToken, 'Usage: /work-on <TOKEN>');
             return;
         }
         const session = await this._findSessionByToken(token);

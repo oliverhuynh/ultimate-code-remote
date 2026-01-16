@@ -8,6 +8,8 @@ const ROOT_DIR = path.join(os.homedir(), '.ultimate-code-remote');
 const REPOS_PATH = path.join(ROOT_DIR, 'repos.json');
 const TOKENS_PATH = path.join(ROOT_DIR, 'tokens.json');
 const SESSIONS_INDEX_PATH = path.join(ROOT_DIR, 'sessions.json');
+const CONVERSATIONS_PATH = path.join(__dirname, '../data/conversations.json');
+const { getCodexConversation } = require('./codex-conversation');
 
 function ensureDir(dir) {
     if (!fs.existsSync(dir)) {
@@ -23,6 +25,95 @@ function readJson(filePath, fallback) {
         logger.warn(`Failed to read ${filePath}: ${error.message}`);
         return fallback;
     }
+}
+
+function loadConversations() {
+    return readJson(CONVERSATIONS_PATH, {});
+}
+
+function parseTimestamp(value) {
+    if (!value) return null;
+    if (typeof value === 'number') {
+        return value < 1e12 ? value * 1000 : value;
+    }
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getSessionLastAccess(session, sessionPath) {
+    const candidates = [
+        session?.lastAccess,
+        session?.lastCommand,
+        session?.updatedAt,
+        session?.updated,
+        session?.created,
+        session?.createdAt
+    ];
+
+    for (const candidate of candidates) {
+        const ts = parseTimestamp(candidate);
+        if (ts) return ts;
+    }
+
+    if (sessionPath && fs.existsSync(sessionPath)) {
+        try {
+            return fs.statSync(sessionPath).mtimeMs;
+        } catch (error) {
+            logger.warn(`Failed to read session stat ${sessionPath}: ${error.message}`);
+        }
+    }
+
+    return 0;
+}
+
+function getSessionMessages(session, conversations) {
+    if (session?.codex?.sessionId) {
+        const codexConversation = getCodexConversation(session.codex.sessionId);
+        if (codexConversation.initialMessage || codexConversation.lastMessage) {
+            return {
+                initialMessage: codexConversation.initialMessage || '',
+                lastMessage: codexConversation.lastMessage || appeaseMessageFallback(session, codexConversation)
+            };
+        }
+    }
+
+    const initialMessage = [
+        session?.notification?.message,
+        session?.notification?.metadata?.userQuestion,
+        session?.notification?.metadata?.claudeResponse
+    ].find(text => typeof text === 'string' && text.trim());
+
+    let lastMessage = null;
+    if (conversations && session?.id && conversations[session.id]?.messages?.length) {
+        const messages = conversations[session.id].messages;
+        lastMessage = messages[messages.length - 1]?.content || null;
+    }
+
+    if (!lastMessage) {
+        lastMessage = [
+            session?.notification?.metadata?.claudeResponse,
+            session?.notification?.metadata?.userQuestion,
+            session?.notification?.message
+        ].find(text => typeof text === 'string' && text.trim()) || null;
+    }
+
+    if ((!initialMessage && !lastMessage) && session?.codex?.sessionId) {
+        const codexConversation = getCodexConversation(session.codex.sessionId);
+        return {
+            initialMessage: codexConversation.initialMessage || '',
+            lastMessage: codexConversation.lastMessage || ''
+        };
+    }
+
+    return { initialMessage: initialMessage || '', lastMessage: lastMessage || '' };
+}
+
+function appeaseMessageFallback(session, codexConversation) {
+    if (codexConversation.lastMessage) return codexConversation.lastMessage;
+    return session?.notification?.metadata?.claudeResponse ||
+        session?.notification?.metadata?.userQuestion ||
+        session?.notification?.message ||
+        '';
 }
 
 function writeJsonAtomic(filePath, data) {
@@ -179,6 +270,64 @@ function listTokens(repoName = null) {
     return entries.filter(([, info]) => info.repoName === repoName);
 }
 
+function listSessions(options = {}) {
+    const repoName = options.repoName || null;
+    const filter = options.filter ? String(options.filter).toLowerCase() : null;
+    const limit = typeof options.limit === 'number' ? options.limit : 10;
+
+    const tokens = readJson(TOKENS_PATH, { tokens: {} });
+    const entries = Object.entries(tokens.tokens || {});
+    const filtered = repoName
+        ? entries.filter(([, info]) => info.repoName === repoName)
+        : entries;
+
+    const conversations = filter ? loadConversations() : null;
+    const results = [];
+
+    filtered.forEach(([token, info]) => {
+        const session = loadSessionFile(info.repoName, info.sessionId);
+        const localSessionPath = session
+            ? path.join(getRepoSessionsDir(info.repoName), `${info.sessionId}.json`)
+            : null;
+        let sessionPath = localSessionPath;
+        if (session?.codex?.sessionId) {
+            const codexPath = require('./codex-conversation').findCodexSessionFile(
+                session.codex.sessionId,
+                require('./codex-conversation').getCodexSessionsDir()
+            );
+            if (codexPath) {
+                sessionPath = codexPath;
+            }
+        }
+        const lastAccess = getSessionLastAccess(session, sessionPath || localSessionPath);
+        const { initialMessage, lastMessage } = getSessionMessages(session, conversations);
+
+        if (filter) {
+            const matches = (initialMessage && initialMessage.toLowerCase().includes(filter)) ||
+                (lastMessage && lastMessage.toLowerCase().includes(filter));
+            if (!matches) return;
+        }
+
+        results.push({
+            token,
+            info,
+            session,
+            lastAccess,
+            sessionPath,
+            initialMessage,
+            lastMessage
+        });
+    });
+
+    results.sort((a, b) => b.lastAccess - a.lastAccess);
+
+    if (limit >= 0) {
+        return results.slice(0, limit);
+    }
+
+    return results;
+}
+
 function generateToken() {
     const tokens = readJson(TOKENS_PATH, { tokens: {} }).tokens || {};
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -266,6 +415,7 @@ module.exports = {
     removeSession,
     updateSession,
     listTokens,
+    listSessions,
     reindexSessions,
     createManualSession,
     generateToken
