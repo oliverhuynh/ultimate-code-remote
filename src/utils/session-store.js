@@ -79,15 +79,20 @@ function getSessionMessages(session, conversations) {
     }
 
     const initialMessage = [
-        session?.notification?.message,
         session?.notification?.metadata?.userQuestion,
+        session?.notification?.message,
         session?.notification?.metadata?.claudeResponse
     ].find(text => typeof text === 'string' && text.trim());
 
     let lastMessage = null;
     if (conversations && session?.id && conversations[session.id]?.messages?.length) {
         const messages = conversations[session.id].messages;
-        lastMessage = messages[messages.length - 1]?.content || null;
+        const firstUser = messages.find(msg => msg.type === 'user' && msg.content && !looksLikeSlashCommand(msg.content))?.content || null;
+        const lastUser = [...messages].reverse().find(msg => msg.type === 'user' && msg.content && !looksLikeSlashCommand(msg.content))?.content || null;
+        return {
+            initialMessage: firstUser || initialMessage || '',
+            lastMessage: lastUser || ''
+        };
     }
 
     if (!lastMessage) {
@@ -109,11 +114,17 @@ function getSessionMessages(session, conversations) {
     return { initialMessage: initialMessage || '', lastMessage: lastMessage || '' };
 }
 
+function looksLikeSlashCommand(text) {
+    const trimmed = String(text).trim();
+    if (!trimmed) return false;
+    return trimmed.startsWith('/');
+}
+
 function getSessionSummary(session) {
     if (!session) return '(no conversation recorded)';
     const conversations = loadConversations();
     const { initialMessage, lastMessage } = getSessionMessages(session, conversations);
-    return formatConversation(initialMessage, lastMessage);
+    return formatConversation(initialMessage, lastMessage, Infinity);
 }
 
 function appeaseMessageFallback(session, codexConversation) {

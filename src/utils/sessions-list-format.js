@@ -29,8 +29,9 @@ function formatConversation(initialMessage, lastMessage, maxLength = DEFAULT_MAX
         parts.push(lastMessage.trim());
     }
     const combined = parts.filter(Boolean).join(' | ');
-    if (!combined) return '(no conversation recorded)';
+    if (!combined) return '(no user prompt captured)';
     const singleLine = combined.replace(/\s+/g, ' ');
+    if (!Number.isFinite(maxLength)) return singleLine;
     if (singleLine.length <= maxLength) return singleLine;
     return `${singleLine.slice(0, maxLength - 3)}...`;
 }

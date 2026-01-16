@@ -75,10 +75,10 @@ function extractConversationFromFile(filePath) {
             if (!text) continue;
             const isInstruction = looksLikeInstructions(text);
 
-            if (role === 'user' && !isInstruction) {
+            if (role === 'user' && !isInstruction && !looksLikeSlashCommand(text)) {
                 lastUser = text;
             }
-            if (!firstUser && role === 'user' && !isInstruction) {
+            if (!firstUser && role === 'user' && !isInstruction && !looksLikeSlashCommand(text)) {
                 firstUser = text;
             }
             lastMessage = text;
@@ -103,6 +103,12 @@ function looksLikeInstructions(text) {
     if (lowered.includes('agents.md instructions')) return true;
     if (lowered.includes('<environment_context>') || compact.includes('<environment_context>')) return true;
     return false;
+}
+
+function looksLikeSlashCommand(text) {
+    const trimmed = String(text).trim();
+    if (!trimmed) return false;
+    return trimmed.startsWith('/');
 }
 
 function getCodexConversation(sessionId) {
