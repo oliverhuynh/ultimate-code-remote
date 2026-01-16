@@ -1,0 +1,24 @@
+# Review Notes
+- Work-on summaries now use last user + last assistant reply.
+- Non-Codex summaries now ignore slash command lines when selecting first/last user messages.
+- Implemented summary format spec: user-only messages, slash/instruction filtering, and new fallback text.
+- Codex conversation now ignores slash command lines when selecting first/last user messages.
+- Work-on summaries no longer truncate (formatConversation supports unlimited length).
+- Added shared slash command extraction and prioritized slash commands across channels.
+- Email replies now include a notice when extra content is ignored.
+- Telegram/LINE warn when extra content is ignored.
+- Added TELEGRAM_TIMEOUT_MS support for axios calls (helps ETIMEDOUT).
+- Telegram send error logging now includes status, response data, message, and code.
+- Codex conversation cache now refreshes when the underlying .jsonl changes.
+- Instruction/environment_context filtering now tolerates whitespace variations.
+- Codex conversation now uses last user message (not assistant) for the summary.
+- Updated sessions list to use Codex session file mtime for Codex sessions.
+- Added optional Repo column alongside Session when DEBUG=yes for CLI sessions list.
+- Added optional Session column when DEBUG=yes for CLI sessions list.
+- Conversation formatting now joins initial + last message with a clear separator.
+- Prefer Codex conversation when available for Codex sessions.
+- Fixed Updated column pluralization (1 hour vs 1 hours).
+- Consolidated webhook + live stream routing under a master Express server.
+- Standardized webhook public URL configuration on WEBHOOK_BASE_URL.
+- Live stream UI now renders typed events with timestamps in a card layout.
+- Live stream routes removed from per-channel webhook apps to avoid duplicates.

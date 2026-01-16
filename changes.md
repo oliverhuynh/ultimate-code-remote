@@ -10,7 +10,10 @@
 - Conversation summaries now ignore slash command lines and use user-only messages.
 - Work-on summaries now include the last assistant reply.
 - CodexRunner logs full command line when DEBUG includes `codex-verbose`.
+- Added live stream gateway with per-token URL, SSE feed, and event logging for Codex/Claude.
 - Repo update command can set per-repo `codexSandbox` values.
+- Webhook + live stream routing now run under a master Express server.
+- Standardized public base URL for webhook + live stream on `WEBHOOK_BASE_URL`.
 
 ## 2026-01-15
 - **2026-01-15**: Add Codex runner with resume support and safety notes.

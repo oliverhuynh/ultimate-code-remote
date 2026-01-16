@@ -1,0 +1,533 @@
+/**
+ * Email Listener
+ * Monitors IMAP inbox for replies and extracts commands
+ */
+
+const Imap = require('node-imap');
+const { simpleParser } = require('mailparser');
+const EventEmitter = require('events');
+const Logger = require('../core/logger');
+const fs = require('fs');
+const path = require('path');
+const sessionStore = require('../utils/session-store');
+const currentTokenStore = require('../utils/current-token-store');
+const { isEmailAuthPass } = require('../utils/email-auth');
+const { isCommandSafe } = require('../utils/command-safety');
+const { redactText } = require('../utils/redact-secrets');
+const RateLimiter = require('../utils/rate-limiter');
+
+class EmailListener extends EventEmitter {
+    constructor(config) {
+        super();
+        this.logger = new Logger('EmailListener');
+        this.config = config;
+        this.imap = null;
+        this.isConnected = false;
+        this.isListening = false;
+        this.sessionsDir = sessionStore.ROOT_DIR;
+        this.sentMessagesPath = config.sentMessagesPath || path.join(__dirname, '../data/sent-messages.json');
+        this.checkInterval = (config.template?.checkInterval || 30) * 1000; // Convert to milliseconds
+        this.lastCheckTime = new Date();
+        this.rateLimiter = new RateLimiter();
+        
+        this._ensureDirectories();
+    }
+
+    _ensureDirectories() {
+        if (!fs.existsSync(this.sessionsDir)) {
+            fs.mkdirSync(this.sessionsDir, { recursive: true });
+        }
+    }
+
+    async start() {
+        if (this.isListening) {
+            this.logger.warn('Email listener already running');
+            return;
+        }
+
+        try {
+            if ((process.env.EMAIL_AUTH_MODE || 'strict').toLowerCase() === 'strict') {
+                this.logger.warn('EMAIL_AUTH_MODE=strict requires Authentication-Results headers; if your provider omits them, set EMAIL_AUTH_MODE=relaxed.');
+            }
+            await this._connect();
+            this._startListening();
+            this.isListening = true;
+            this.logger.info('Email listener started successfully');
+        } catch (error) {
+            this.logger.error('Failed to start email listener:', error.message);
+            throw error;
+        }
+    }
+
+    async stop() {
+        if (!this.isListening) {
+            return;
+        }
+
+        this.isListening = false;
+        
+        if (this.imap) {
+            this.imap.end();
+            this.imap = null;
+        }
+        
+        this.isConnected = false;
+        this.logger.info('Email listener stopped');
+    }
+
+    async _connect() {
+        return new Promise((resolve, reject) => {
+            this.imap = new Imap({
+                user: this.config.imap.auth.user,
+                password: this.config.imap.auth.pass,
+                host: this.config.imap.host,
+                port: this.config.imap.port,
+                tls: this.config.imap.secure,
+                connTimeout: 10000,
+                authTimeout: 5000,
+                keepalive: true
+            });
+
+            this.imap.once('ready', () => {
+                this.isConnected = true;
+                this.logger.debug('IMAP connection established');
+                resolve();
+            });
+
+            this.imap.once('error', (error) => {
+                this.logger.error('IMAP connection error:', error.message);
+                reject(error);
+            });
+
+            this.imap.once('end', () => {
+                this.isConnected = false;
+                this.logger.debug('IMAP connection ended');
+            });
+
+            this.imap.connect();
+        });
+    }
+
+    _startListening() {
+        // Periodically check for new emails
+        this._checkNewMails();
+        setInterval(() => {
+            if (this.isListening && this.isConnected) {
+                this._checkNewMails();
+            }
+        }, this.checkInterval);
+    }
+
+    async _checkNewMails() {
+        try {
+            await this._openInbox();
+            await this._searchAndProcessMails();
+        } catch (error) {
+            this.logger.error('Error checking emails:', error.message);
+            
+            // If connection is lost, try to reconnect
+            if (!this.isConnected) {
+                this.logger.info('Attempting to reconnect...');
+                try {
+                    await this._connect();
+                } catch (reconnectError) {
+                    this.logger.error('Reconnection failed:', reconnectError.message);
+                }
+            }
+        }
+    }
+
+    async _openInbox() {
+        return new Promise((resolve, reject) => {
+            this.imap.openBox('INBOX', false, (error, box) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(box);
+                }
+            });
+        });
+    }
+
+    async _searchAndProcessMails() {
+        return new Promise((resolve, reject) => {
+            // Search for recent unread emails
+            const searchCriteria = [
+                'UNSEEN',
+                ['SINCE', this.lastCheckTime]
+            ];
+
+            this.imap.search(searchCriteria, (searchError, results) => {
+                if (searchError) {
+                    reject(searchError);
+                    return;
+                }
+
+                if (results.length === 0) {
+                    resolve();
+                    return;
+                }
+
+                this.logger.debug(`Found ${results.length} new emails`);
+
+                const fetch = this.imap.fetch(results, { 
+                    bodies: '',
+                    markSeen: true 
+                });
+
+                fetch.on('message', (msg, seqno) => {
+                    this._processMessage(msg, seqno);
+                });
+
+                fetch.once('error', (fetchError) => {
+                    this.logger.error('Fetch error:', fetchError.message);
+                    reject(fetchError);
+                });
+
+                fetch.once('end', () => {
+                    this.lastCheckTime = new Date();
+                    resolve();
+                });
+            });
+        });
+    }
+
+    _processMessage(msg, seqno) {
+        let buffer = '';
+
+        msg.on('body', (stream, info) => {
+            stream.on('data', (chunk) => {
+                buffer += chunk.toString('utf8');
+            });
+
+            stream.once('end', async () => {
+                try {
+                    const parsed = await simpleParser(buffer);
+                    await this._handleParsedEmail(parsed, seqno);
+                } catch (parseError) {
+                    this.logger.error('Email parsing error:', parseError.message);
+                }
+            });
+        });
+
+        msg.once('attributes', (attrs) => {
+            this.logger.debug(`Processing email ${seqno}:`, {
+                date: attrs.date,
+                flags: attrs.flags
+            });
+        });
+
+        msg.once('end', () => {
+            this.logger.debug(`Finished processing email ${seqno}`);
+        });
+    }
+
+    async _handleParsedEmail(email, seqno) {
+        try {
+            const authMode = (process.env.EMAIL_AUTH_MODE || 'strict').toLowerCase();
+            const authResult = isEmailAuthPass(email.headers, authMode);
+            if (!authResult.ok) {
+                this.logger.warn(`Email auth failed (${authResult.reason}) for email ${seqno}`);
+                return;
+            }
+
+            // First check if this is a system-sent email
+            const messageId = email.headers.get('message-id');
+            if (await this._isSystemSentEmail(messageId)) {
+                this.logger.debug(`Skipping system-sent email: ${messageId}`);
+                await this._removeFromSentMessages(messageId);
+                return;
+            }
+            
+            // Check if it's a reply email
+            if (!this._isReplyEmail(email)) {
+                this.logger.debug(`Email ${seqno} is not a TaskPing reply`);
+                return;
+            }
+
+            // Extract session ID (fallback to current token by sender)
+            let sessionId = this._extractSessionId(email);
+            if (!sessionId) {
+                const senderKey = this._getSenderKey(email);
+                const workingToken = senderKey ? currentTokenStore.getToken(senderKey) : null;
+                sessionId = workingToken ? this._getSessionIdByToken(workingToken) : null;
+            }
+            if (!sessionId) {
+                this.logger.warn(`No session ID found in email ${seqno}`);
+                return;
+            }
+
+            // Validate session
+            const session = await this._validateSession(sessionId);
+            if (!session) {
+                this.logger.warn(`Invalid session ID in email ${seqno}: ${sessionId}`);
+                return;
+            }
+
+            const senderKey = this._getSenderKey(email);
+            if (senderKey && session.token) {
+                currentTokenStore.setToken(senderKey, session.token);
+            }
+
+            if (!this._checkRateLimit(senderKey, sessionId)) {
+                this.logger.warn(`Rate limit exceeded for ${senderKey || 'unknown sender'}`);
+                return;
+            }
+
+            // Extract command
+            const extracted = this._extractCommand(email);
+            const command = extracted?.command;
+            if (!command) {
+                this.logger.warn(`No command found in email ${seqno}`);
+                return;
+            }
+
+            // Security check
+            if (!this._isCommandSafe(command)) {
+            this.logger.warn(`Unsafe command in email ${seqno}: ${redactText(command)}`);
+                return;
+            }
+
+            // Emit command event
+            this.emit('command', {
+                sessionId,
+                command: command.trim(),
+                notice: extracted?.notice || null,
+                email: {
+                    from: email.from?.text,
+                    subject: email.subject,
+                    date: email.date
+                },
+                session
+            });
+
+            this.logger.info(`Command extracted from email ${seqno}:`, {
+                sessionId,
+                command: redactText(command.substring(0, 100) + (command.length > 100 ? '...' : '')),
+                from: email.from?.text
+            });
+
+        } catch (error) {
+            this.logger.error(`Error handling email ${seqno}:`, error.message);
+        }
+    }
+
+    _isReplyEmail(email) {
+        // Check if subject contains Claude-Code-Remote identifier
+        const subject = email.subject || '';
+        if (!subject.includes('[Claude-Code-Remote')) {
+            return false;
+        }
+
+        // Check if it's a reply (Re: or RE:)
+        const isReply = /^(Re:|RE:|Reply:)/i.test(subject);
+        if (isReply) {
+            return true;
+        }
+
+        // Check if session ID exists in email headers
+        const sessionId = this._extractSessionId(email);
+        return !!sessionId;
+    }
+
+    _extractSessionId(email) {
+        // Extract from email headers
+        const headers = email.headers;
+        if (headers && headers.get('x-claude-code-remote-session-id')) {
+            return headers.get('x-claude-code-remote-session-id');
+        }
+
+        // Extract token from subject line
+        const subject = email.subject || '';
+        const tokenMatch = subject.match(/\[Claude-Code-Remote #([A-Z0-9]{6,8})\]/);
+        if (tokenMatch) {
+            const token = tokenMatch[1];
+            // Look up session by token
+            return this._getSessionIdByToken(token);
+        }
+
+        // Extract from email body (as backup method)
+        const text = email.text || '';
+        const sessionMatch = text.match(/Session ID:\s*([a-f0-9-]{36})/i);
+        if (sessionMatch) {
+            return sessionMatch[1];
+        }
+
+        // Extract from quoted email
+        const html = email.html || '';
+        const htmlSessionMatch = html.match(/Session ID:\s*<code>([a-f0-9-]{36})<\/code>/i);
+        if (htmlSessionMatch) {
+            return htmlSessionMatch[1];
+        }
+
+        return null;
+    }
+
+    _getSessionIdByToken(token) {
+        try {
+            const session = sessionStore.findSessionByToken(token);
+            return session ? session.id : null;
+        } catch (error) {
+            this.logger.error('Error looking up session by token:', error.message);
+            return null;
+        }
+    }
+
+    _getSenderKey(email) {
+        const fromAddress = email.from?.value?.[0]?.address || '';
+        if (!fromAddress) return null;
+        return `email:${fromAddress.toLowerCase()}`;
+    }
+
+    async _validateSession(sessionId) {
+        try {
+            const sessionData = sessionStore.getSessionById(sessionId);
+            if (!sessionData) {
+                return null;
+            }
+            
+            // Tokens never expire.
+
+            // Check command count limit
+            if (sessionData.commandCount >= sessionData.maxCommands) {
+                this.logger.debug(`Session ${sessionId} has reached command limit`);
+                return null;
+            }
+
+            return sessionData;
+        } catch (error) {
+            this.logger.error(`Error reading session ${sessionId}:`, error.message);
+            return null;
+        }
+    }
+
+    _extractCommand(email) {
+        let text = email.text || '';
+        
+        // Remove email signature and quoted content
+        text = this._cleanEmailContent(text);
+        
+        // Remove empty lines and excess whitespace
+        text = text.replace(/\n\s*\n/g, '\n').trim();
+        if (!text) return { command: '', notice: null };
+
+        const { extractSlashCommand } = require('../utils/slash-command');
+        const slash = extractSlashCommand(text);
+        if (slash.command) {
+            return {
+                command: slash.command,
+                notice: slash.ignored
+                    ? 'I found other messages in your reply also, I have prioritized the slash and ignore other message.'
+                    : null
+            };
+        }
+
+        return { command: text, notice: null };
+    }
+
+    _cleanEmailContent(text) {
+        // Remove common email quote markers
+        const lines = text.split('\n');
+        const cleanLines = [];
+        let foundOriginalMessage = false;
+        
+        for (const line of lines) {
+            // Check if reached original email start
+            if (line.includes('-----Original Message-----') ||
+                line.includes('--- Original Message ---') ||
+                line.includes('at') && line.includes('wrote:') ||
+                line.includes('On') && line.includes('wrote:') ||
+                line.match(/^>\s*/) ||  // Quote marker
+                line.includes('Session ID:')) {
+                foundOriginalMessage = true;
+                break;
+            }
+            
+            // Skip common email signatures
+            if (line.includes('--') || 
+                line.includes('Sent from') ||
+                line.includes('Sent from my')) {
+                break;
+            }
+            
+            cleanLines.push(line);
+        }
+        
+        return cleanLines.join('\n').trim();
+    }
+
+    _isCommandSafe(command) {
+        const maxLength = parseInt(process.env.COMMAND_MAX_LENGTH) || 1000;
+        return isCommandSafe(command, maxLength);
+    }
+
+    _checkRateLimit(senderKey, sessionId) {
+        const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 300000;
+        const perSender = parseInt(process.env.RATE_LIMIT_PER_SENDER) || 60;
+        const perSession = parseInt(process.env.RATE_LIMIT_PER_SESSION) || 120;
+
+        if (senderKey) {
+            const sender = this.rateLimiter.check(`email:${senderKey}`, perSender, windowMs);
+            if (!sender.allowed) return false;
+        }
+        if (sessionId) {
+            const session = this.rateLimiter.check(`email:session:${sessionId}`, perSession, windowMs);
+            if (!session.allowed) return false;
+        }
+
+        return true;
+    }
+
+    async updateSessionCommandCount(sessionId) {
+        try {
+            const sessionData = sessionStore.getSessionById(sessionId);
+            if (!sessionData) return;
+
+            sessionData.commandCount = (sessionData.commandCount || 0) + 1;
+            sessionData.lastCommand = new Date().toISOString();
+
+            sessionStore.updateSession(sessionData.repoName, sessionData);
+            this.logger.debug(`Updated command count for session ${sessionId}: ${sessionData.commandCount}`);
+        } catch (error) {
+            this.logger.error(`Error updating session ${sessionId}:`, error.message);
+        }
+    }
+
+    async _isSystemSentEmail(messageId) {
+        if (!messageId || !fs.existsSync(this.sentMessagesPath)) {
+            return false;
+        }
+        
+        try {
+            const sentMessages = JSON.parse(fs.readFileSync(this.sentMessagesPath, 'utf8'));
+            return sentMessages.messages.some(msg => msg.messageId === messageId);
+        } catch (error) {
+            this.logger.error('Error reading sent messages:', error.message);
+            return false;
+        }
+    }
+
+    async _removeFromSentMessages(messageId) {
+        if (!fs.existsSync(this.sentMessagesPath)) {
+            return;
+        }
+        
+        try {
+            const sentMessages = JSON.parse(fs.readFileSync(this.sentMessagesPath, 'utf8'));
+            sentMessages.messages = sentMessages.messages.filter(msg => msg.messageId !== messageId);
+            
+            // Also clean up old messages (older than 24 hours)
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            sentMessages.messages = sentMessages.messages.filter(msg => {
+                return new Date(msg.sentAt) > oneDayAgo;
+            });
+            
+            fs.writeFileSync(this.sentMessagesPath, JSON.stringify(sentMessages, null, 2));
+            this.logger.debug(`Removed message ${messageId} from sent tracking`);
+        } catch (error) {
+            this.logger.error('Error removing from sent messages:', error.message);
+        }
+    }
+}
+
+module.exports = EmailListener;
