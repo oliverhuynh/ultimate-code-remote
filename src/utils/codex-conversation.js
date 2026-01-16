@@ -59,6 +59,7 @@ function extractConversationFromFile(filePath) {
         let lastMessage = '';
         let lastNonInstruction = '';
         let lastUser = '';
+        let lastAssistant = '';
 
         for (const line of lines) {
             let entry;
@@ -78,6 +79,9 @@ function extractConversationFromFile(filePath) {
             if (role === 'user' && !isInstruction && !looksLikeSlashCommand(text)) {
                 lastUser = text;
             }
+            if (role === 'assistant' && !isInstruction) {
+                lastAssistant = text;
+            }
             if (!firstUser && role === 'user' && !isInstruction && !looksLikeSlashCommand(text)) {
                 firstUser = text;
             }
@@ -89,7 +93,8 @@ function extractConversationFromFile(filePath) {
 
         return {
             initialMessage: firstUser || '',
-            lastMessage: lastUser || lastNonInstruction || lastMessage || ''
+            lastMessage: lastUser || lastNonInstruction || lastMessage || '',
+            lastAssistant: lastAssistant || ''
         };
     } catch (error) {
         return { initialMessage: '', lastMessage: '' };

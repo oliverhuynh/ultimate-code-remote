@@ -8,6 +8,7 @@
 - Slash commands are now prioritized in messages across channels (Telegram/LINE/email), with notices when extra content is ignored.
 - Work-on replies now include a short conversation summary for context.
 - Conversation summaries now ignore slash command lines and use user-only messages.
+- Work-on summaries now include the last assistant reply.
 - Repo update command can set per-repo `codexSandbox` values.
 
 ## 2026-01-15

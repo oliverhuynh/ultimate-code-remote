@@ -70,10 +70,11 @@ function getSessionLastAccess(session, sessionPath) {
 function getSessionMessages(session, conversations) {
     if (session?.codex?.sessionId) {
         const codexConversation = getCodexConversation(session.codex.sessionId);
-        if (codexConversation.initialMessage || codexConversation.lastMessage) {
+        if (codexConversation.initialMessage || codexConversation.lastMessage || codexConversation.lastAssistant) {
             return {
                 initialMessage: codexConversation.initialMessage || '',
-                lastMessage: codexConversation.lastMessage || appeaseMessageFallback(session, codexConversation)
+                lastMessage: codexConversation.lastMessage || appeaseMessageFallback(session, codexConversation),
+                lastAssistant: codexConversation.lastAssistant || ''
             };
         }
     }
@@ -89,9 +90,11 @@ function getSessionMessages(session, conversations) {
         const messages = conversations[session.id].messages;
         const firstUser = messages.find(msg => msg.type === 'user' && msg.content && !looksLikeSlashCommand(msg.content))?.content || null;
         const lastUser = [...messages].reverse().find(msg => msg.type === 'user' && msg.content && !looksLikeSlashCommand(msg.content))?.content || null;
+        const lastAssistant = [...messages].reverse().find(msg => msg.type === 'claude' && msg.content)?.content || null;
         return {
             initialMessage: firstUser || initialMessage || '',
-            lastMessage: lastUser || ''
+            lastMessage: lastUser || '',
+            lastAssistant: lastAssistant || ''
         };
     }
 
@@ -111,7 +114,7 @@ function getSessionMessages(session, conversations) {
         };
     }
 
-    return { initialMessage: initialMessage || '', lastMessage: lastMessage || '' };
+    return { initialMessage: initialMessage || '', lastMessage: lastMessage || '', lastAssistant: '' };
 }
 
 function looksLikeSlashCommand(text) {
@@ -123,8 +126,8 @@ function looksLikeSlashCommand(text) {
 function getSessionSummary(session) {
     if (!session) return '(no conversation recorded)';
     const conversations = loadConversations();
-    const { initialMessage, lastMessage } = getSessionMessages(session, conversations);
-    return formatConversation(initialMessage, lastMessage, Infinity);
+    const { lastMessage, lastAssistant } = getSessionMessages(session, conversations);
+    return formatConversation(lastMessage, lastAssistant, Infinity);
 }
 
 function appeaseMessageFallback(session, codexConversation) {
