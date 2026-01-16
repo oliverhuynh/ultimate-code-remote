@@ -207,6 +207,9 @@ class CommandRelayService extends EventEmitter {
 
             const sessionToken = commandItem.session?.token;
             const sessionKey = sessionToken || `email:${commandItem.sessionId}`;
+            const repo = commandItem.session?.repoName
+                ? require('../utils/session-store').getRepoByName(commandItem.session.repoName)
+                : null;
             const runnerContext = {
                 sessionKey,
                 sendCommand: async (command) => {
@@ -216,7 +219,8 @@ class CommandRelayService extends EventEmitter {
                     }
                     return this._sendCommandToClaudeCode(command, claudeProcess, commandItem.sessionId);
                 },
-                workdir: commandItem.session?.workdir
+                workdir: commandItem.session?.workdir,
+                sandbox: repo?.codexSandbox || null
             };
 
             let result;

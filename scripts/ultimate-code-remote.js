@@ -60,6 +60,7 @@ Usage:
   ultimate-code-remote repo add <name> <path>
   ultimate-code-remote repo init
   ultimate-code-remote repo remove <name>
+  ultimate-code-remote repo update --repo <name> --codex-sandbox <level>
   ultimate-code-remote sessions list [--repo <name>] [--filter <filter>] (top 10 by latest access)
   ultimate-code-remote sessions reindex
   ultimate-code-remote sessions new --repo <name>
@@ -144,6 +145,32 @@ function repoInit() {
     const cwd = process.cwd();
     const name = path.basename(cwd);
     repoAdd(name, cwd);
+}
+
+function repoUpdate(options = {}) {
+    const repoName = options.repoName;
+    const codexSandbox = options.codexSandbox;
+    if (!repoName || !codexSandbox) {
+        console.log('Usage: ultimate-code-remote repo update --repo <name> --codex-sandbox <level>');
+        process.exit(1);
+    }
+
+    const allowed = ['read-only', 'workspace-write', 'danger-full-access'];
+    if (!allowed.includes(codexSandbox)) {
+        console.log(`Invalid codex sandbox: ${codexSandbox}. Allowed: ${allowed.join(', ')}`);
+        process.exit(1);
+    }
+
+    const data = loadRepos();
+    const repo = data.repos.find(entry => entry.name === repoName);
+    if (!repo) {
+        console.log(`Repo not found: ${repoName}`);
+        process.exit(1);
+    }
+
+    repo.codexSandbox = codexSandbox;
+    saveRepos(data);
+    console.log(`Updated repo ${repoName}: codexSandbox=${codexSandbox}`);
 }
 
 function sessionsList(repoName = null, filter = null) {
@@ -291,6 +318,14 @@ async function run() {
         }
         if (action === 'init') {
             repoInit();
+            return;
+        }
+        if (action === 'update') {
+            const repoFlagIndex = args.indexOf('--repo');
+            const repoName = repoFlagIndex !== -1 ? args[repoFlagIndex + 1] : null;
+            const sandboxFlagIndex = args.indexOf('--codex-sandbox');
+            const codexSandbox = sandboxFlagIndex !== -1 ? args[sandboxFlagIndex + 1] : null;
+            repoUpdate({ repoName, codexSandbox });
             return;
         }
         showHelp();

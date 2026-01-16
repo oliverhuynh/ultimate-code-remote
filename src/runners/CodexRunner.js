@@ -60,7 +60,8 @@ class CodexRunner extends BaseRunner {
         }
 
         const outputFile = this._createOutputFilePath();
-        const args = this._buildArgs({ mode, sessionId, prompt, outputFile });
+        const sandbox = context.sandbox || this.sandbox;
+        const args = this._buildArgs({ mode, sessionId, prompt, outputFile, sandbox });
 
         const workdir = context.workdir || this.workdir;
         const result = await this._spawnCodex(args, outputFile, workdir);
@@ -76,8 +77,8 @@ class CodexRunner extends BaseRunner {
         };
     }
 
-    _buildArgs({ mode, sessionId, prompt, outputFile }) {
-        const args = ['exec', '--json', '--output-last-message', outputFile, '--sandbox', this.sandbox];
+    _buildArgs({ mode, sessionId, prompt, outputFile, sandbox }) {
+        const args = ['exec', '--json', '--output-last-message', outputFile, '--sandbox', sandbox];
 
         if (this.fullAuto) {
             args.push('--full-auto');

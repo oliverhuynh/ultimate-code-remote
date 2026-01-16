@@ -218,11 +218,13 @@ class TelegramWebhookHandler {
         try {
             const tmuxSession = session.tmuxSession || 'default';
             const sessionKey = token;
+            const repo = sessionStore.getRepoByName(session.repoName);
             const runnerContext = {
                 sessionKey,
                 sessionName: tmuxSession,
                 injector: this.injector,
-                workdir: session.workdir
+                workdir: session.workdir,
+                sandbox: repo?.codexSandbox || null
             };
 
             let result;
