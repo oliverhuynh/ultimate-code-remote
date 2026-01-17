@@ -42,6 +42,14 @@ function parseTimestamp(value) {
 }
 
 function getSessionLastAccess(session, sessionPath) {
+    if (sessionPath && fs.existsSync(sessionPath)) {
+        try {
+            return fs.statSync(sessionPath).mtimeMs;
+        } catch (error) {
+            logger.warn(`Failed to read session stat ${sessionPath}: ${error.message}`);
+        }
+    }
+
     const candidates = [
         session?.lastAccess,
         session?.lastCommand,
@@ -54,14 +62,6 @@ function getSessionLastAccess(session, sessionPath) {
     for (const candidate of candidates) {
         const ts = parseTimestamp(candidate);
         if (ts) return ts;
-    }
-
-    if (sessionPath && fs.existsSync(sessionPath)) {
-        try {
-            return fs.statSync(sessionPath).mtimeMs;
-        } catch (error) {
-            logger.warn(`Failed to read session stat ${sessionPath}: ${error.message}`);
-        }
     }
 
     return 0;

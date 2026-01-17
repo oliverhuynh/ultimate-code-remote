@@ -2,10 +2,9 @@ const fs = require('fs');
 
 const DEFAULT_MAX_CONVERSATION_LENGTH = 120;
 
-function formatRelativeTime(sessionPath) {
-    if (!sessionPath || !fs.existsSync(sessionPath)) return 'unknown';
-    const mtimeMs = fs.statSync(sessionPath).mtimeMs;
-    const diffMs = Date.now() - mtimeMs;
+function formatRelativeTimeFromTimestamp(timestampMs) {
+    if (!timestampMs || Number.isNaN(timestampMs)) return 'unknown';
+    const diffMs = Date.now() - timestampMs;
     if (diffMs < 0) return '0 seconds ago';
     const seconds = Math.floor(diffMs / 1000);
     if (seconds < 60) return formatTimeUnit(seconds, 'second');
@@ -15,6 +14,12 @@ function formatRelativeTime(sessionPath) {
     if (hours < 24) return formatTimeUnit(hours, 'hour');
     const days = Math.floor(hours / 24);
     return formatTimeUnit(days, 'day');
+}
+
+function formatRelativeTime(sessionPath) {
+    if (!sessionPath || !fs.existsSync(sessionPath)) return 'unknown';
+    const mtimeMs = fs.statSync(sessionPath).mtimeMs;
+    return formatRelativeTimeFromTimestamp(mtimeMs);
 }
 
 function formatTimeUnit(value, unit) {
@@ -51,8 +56,10 @@ function formatSessionsList(entries, options = {}) {
         ? options.maxLength
         : DEFAULT_MAX_CONVERSATION_LENGTH;
 
-    const lines = entries.map(({ token, info, sessionPath, initialMessage, lastMessage }) => {
-        const updated = formatRelativeTime(sessionPath);
+    const lines = entries.map(({ token, info, sessionPath, lastAccess, initialMessage, lastMessage }) => {
+        const updated = lastAccess
+            ? formatRelativeTimeFromTimestamp(lastAccess)
+            : formatRelativeTime(sessionPath);
         const conversation = formatConversation(initialMessage, lastMessage, maxLength);
         if (!tokenColumn) {
             return `${updated} ${conversation}`;
@@ -80,6 +87,7 @@ function formatSessionsList(entries, options = {}) {
 module.exports = {
     DEFAULT_MAX_CONVERSATION_LENGTH,
     formatRelativeTime,
+    formatRelativeTimeFromTimestamp,
     formatConversation,
     formatSessionsList
 };
